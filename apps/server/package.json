@@ -1,0 +1,25 @@
+{
+  "name": "@web-pazle/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k -n typescript,node \"tsc -p tsconfig.json --watch --preserveWatchOutput\" \"node --watch dist/main.js\"",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@web-pazle/shared": "0.1.0",
+    "@colyseus/schema": "latest",
+    "drizzle-orm": "latest",
+    "pg": "^8.0.0",
+    "@colyseus/core": "^0.18.0",
+    "@colyseus/ws-transport": "^0.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.0.0",
+    "drizzle-kit": "latest"
+  }
+}

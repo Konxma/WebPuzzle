@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WebPuzzle rendering regression</title>
+<style>
+  body { margin: 12px; font: 14px system-ui; background: #fafaf7; }
+  #board { width: 1000px; height: 650px; --board-background: #20221e; --board-frame: #2c322b; --board-line: #4b584c; }
+  canvas { display: block; }
+  #result { white-space: pre-wrap; }
+</style>
+<button id="run">Run rendering checks</button>
+<pre id="result">Ready. Uses synthetic puzzles only, without a room server or saved games.</pre>
+<div id="board"></div>
+<script type="module" src="./rendering-browser.mjs"></script>

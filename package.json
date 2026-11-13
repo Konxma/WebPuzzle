@@ -1,0 +1,26 @@
+{
+  "name": "web-pazle",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n shared,server,client \"npm run dev -w @web-pazle/shared\" \"npm run dev -w @web-pazle/server\" \"npm run dev -w @web-pazle/client\"",
+    "build": "npm run build -w @web-pazle/shared && npm run build -w @web-pazle/server && npm run build -w @web-pazle/client",
+    "typecheck": "npm run build -w @web-pazle/shared && npm run typecheck --workspaces --if-present",
+    "predev": "npm run build -w @web-pazle/shared && npm run build -w @web-pazle/server",
+    "test": "npm run build -w @web-pazle/shared && node --test packages/shared/tests/*.test.mjs",
+    "test:rooms": "node --test apps/server/tests/rooms.integration.mjs",
+    "test:saves": "node --test apps/server/tests/saves.integration.mjs",
+    "dev:lan": "node --experimental-strip-types scripts/start-lan.mts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0",
+    "typescript": "^5.9.0"
+  },
+  "dependencies": {
+    "ws": "8.22.1"
+  }
+}
