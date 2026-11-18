@@ -25,7 +25,9 @@ internal sealed class WebPuzzleLauncher : Form
     private readonly LauncherButton choosePhoto = new LauncherButton();
     private readonly LauncherButton resetPhoto = new LauncherButton();
     private readonly Panel titleBar = new Panel();
-    private readonly Button theme = new LauncherButton();
+    private readonly Label themeLabel = new Label { Text = "Тема", TextAlign = ContentAlignment.MiddleLeft };
+    private readonly RadioButton lightTheme = new RadioButton { Appearance = Appearance.Button, Text = "Світла" };
+    private readonly RadioButton darkTheme = new RadioButton { Appearance = Appearance.Button, Text = "Темна" };
     private readonly Button minimize = new LauncherButton();
     private readonly Button close = new LauncherButton();
     private bool dark;
@@ -88,12 +90,15 @@ internal sealed class WebPuzzleLauncher : Form
             ReleaseCapture();
             SendMessage(Handle, NonClientLeftButtonDown, CaptionArea, IntPtr.Zero);
         };
-        theme.SetBounds(12, 4, 120, 32);
-        theme.Click += (sender, args) => {
-            dark = !dark;
-            ApplyTheme();
-            SaveTheme();
-        };
+        themeLabel.SetBounds(14, 5, 44, 30);
+        lightTheme.SetBounds(58, 5, 65, 30);
+        darkTheme.SetBounds(124, 5, 65, 30);
+        lightTheme.AccessibleName = "Світла тема";
+        darkTheme.AccessibleName = "Темна тема";
+        lightTheme.TextAlign = ContentAlignment.MiddleCenter;
+        darkTheme.TextAlign = ContentAlignment.MiddleCenter;
+        lightTheme.CheckedChanged += (sender, args) => { if (lightTheme.Checked) ChangeTheme(false); };
+        darkTheme.CheckedChanged += (sender, args) => { if (darkTheme.Checked) ChangeTheme(true); };
         minimize.SetBounds(348, 2, 40, 36);
         minimize.Text = "−";
         minimize.AccessibleName = "Згорнути вікно";
@@ -102,7 +107,7 @@ internal sealed class WebPuzzleLauncher : Form
         close.Text = "×";
         close.AccessibleName = "Закрити лаунчер";
         close.Click += (sender, args) => Close();
-        titleBar.Controls.AddRange(new Control[] { theme, minimize, close });
+        titleBar.Controls.AddRange(new Control[] { themeLabel, lightTheme, darkTheme, minimize, close });
 
         banner.SetBounds(1, 41, 432, 164);
         banner.Disposed += (sender, args) => { if (banner.Image != null) banner.Image.Dispose(); };
@@ -228,6 +233,14 @@ internal sealed class WebPuzzleLauncher : Form
         }
     }
 
+    private void ChangeTheme(bool useDark)
+    {
+        if (dark == useDark) return;
+        dark = useDark;
+        ApplyTheme();
+        SaveTheme();
+    }
+
     private bool LoadTheme()
     {
         try { return File.Exists(themePath) && File.ReadAllText(themePath) == "dark"; }
@@ -266,8 +279,17 @@ internal sealed class WebPuzzleLauncher : Form
         titleBar.BackColor = chrome;
         status.ForeColor = muted;
         statusDot.ForeColor = dark ? Color.FromArgb(187, 213, 189) : Color.FromArgb(40, 78, 62);
-        theme.Text = dark ? "Світла тема" : "Темна тема";
-        foreach (var button in new[] { theme, minimize, close })
+        themeLabel.ForeColor = text;
+        lightTheme.Checked = !dark;
+        darkTheme.Checked = dark;
+        var selected = dark ? Color.FromArgb(187, 213, 189) : Color.FromArgb(210, 225, 207);
+        var selectedText = Color.FromArgb(32, 54, 44);
+        foreach (var option in new[] { lightTheme, darkTheme })
+        {
+            ConfigureButton(option, chrome, option.Checked ? selectedText : text, option.Checked ? selected : hover, border);
+            option.FlatAppearance.CheckedBackColor = selected;
+        }
+        foreach (var button in new[] { minimize, close })
         {
             ConfigureButton(button, chrome, text, hover, border);
             button.FlatAppearance.BorderSize = 0;
@@ -285,7 +307,7 @@ internal sealed class WebPuzzleLauncher : Form
         statusDot.Invalidate();
     }
 
-    private static void ConfigureButton(Button button, Color background, Color foreground, Color hover, Color border)
+    private static void ConfigureButton(ButtonBase button, Color background, Color foreground, Color hover, Color border)
     {
         button.FlatStyle = FlatStyle.Flat;
         button.UseVisualStyleBackColor = false;
