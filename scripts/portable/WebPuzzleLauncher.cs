@@ -1,4 +1,5 @@
 using System;
+using Microsoft.Win32;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -26,10 +27,14 @@ internal sealed class WebPuzzleLauncher : Form
     private readonly LauncherButton resetPhoto = new LauncherButton();
     private readonly Panel titleBar = new Panel();
     private readonly Label themeLabel = new Label { Text = "Тема", TextAlign = ContentAlignment.MiddleLeft };
+    private readonly RadioButton systemTheme = new RadioButton { Appearance = Appearance.Button, Text = "Системна" };
     private readonly RadioButton lightTheme = new RadioButton { Appearance = Appearance.Button, Text = "Світла" };
     private readonly RadioButton darkTheme = new RadioButton { Appearance = Appearance.Button, Text = "Темна" };
     private readonly Button minimize = new LauncherButton();
     private readonly Button close = new LauncherButton();
+    private enum ThemeMode { System, Light, Dark }
+    private ThemeMode themeMode;
+    private bool themeInitialized;
     private bool dark;
     private readonly Panel statusDot = new Panel();
     private readonly Label status = new Label();
@@ -59,6 +64,8 @@ internal sealed class WebPuzzleLauncher : Form
     private bool ready;
     private bool busy;
 
+    private const int SettingsChanged = 0x001A;
+    private const int WindowsThemeChanged = 0x031A;
     private const int NonClientLeftButtonDown = 0x00A1;
     private static readonly IntPtr CaptionArea = new IntPtr(2);
     [DllImport("user32.dll")]
@@ -91,14 +98,19 @@ internal sealed class WebPuzzleLauncher : Form
             SendMessage(Handle, NonClientLeftButtonDown, CaptionArea, IntPtr.Zero);
         };
         themeLabel.SetBounds(14, 5, 44, 30);
-        lightTheme.SetBounds(58, 5, 65, 30);
-        darkTheme.SetBounds(124, 5, 65, 30);
+        systemTheme.SetBounds(58, 5, 88, 30);
+        lightTheme.SetBounds(148, 5, 65, 30);
+        darkTheme.SetBounds(215, 5, 65, 30);
+        systemTheme.AccessibleName = "Системна тема";
+        systemTheme.AccessibleDescription = "Використовує тему програм Windows";
+        systemTheme.TextAlign = ContentAlignment.MiddleCenter;
+        systemTheme.CheckedChanged += (sender, args) => { if (systemTheme.Checked) ChangeTheme(ThemeMode.System); };
         lightTheme.AccessibleName = "Світла тема";
         darkTheme.AccessibleName = "Темна тема";
         lightTheme.TextAlign = ContentAlignment.MiddleCenter;
         darkTheme.TextAlign = ContentAlignment.MiddleCenter;
-        lightTheme.CheckedChanged += (sender, args) => { if (lightTheme.Checked) ChangeTheme(false); };
-        darkTheme.CheckedChanged += (sender, args) => { if (darkTheme.Checked) ChangeTheme(true); };
+        lightTheme.CheckedChanged += (sender, args) => { if (lightTheme.Checked) ChangeTheme(ThemeMode.Light); };
+        darkTheme.CheckedChanged += (sender, args) => { if (darkTheme.Checked) ChangeTheme(ThemeMode.Dark); };
         minimize.SetBounds(348, 2, 40, 36);
         minimize.Text = "−";
         minimize.AccessibleName = "Згорнути вікно";
@@ -107,7 +119,7 @@ internal sealed class WebPuzzleLauncher : Form
         close.Text = "×";
         close.AccessibleName = "Закрити лаунчер";
         close.Click += (sender, args) => Close();
-        titleBar.Controls.AddRange(new Control[] { themeLabel, lightTheme, darkTheme, minimize, close });
+        titleBar.Controls.AddRange(new Control[] { themeLabel, systemTheme, lightTheme, darkTheme, minimize, close });
 
         banner.SetBounds(1, 41, 432, 164);
         banner.Disposed += (sender, args) => { if (banner.Image != null) banner.Image.Dispose(); };
@@ -154,8 +166,11 @@ internal sealed class WebPuzzleLauncher : Form
         };
         Controls.AddRange(new Control[] { titleBar, banner, title, choosePhoto, resetPhoto, statusDot, status, play, stop });
         AcceptButton = play;
-        dark = LoadTheme();
+        themeMode = LoadTheme();
+        dark = ResolveDarkTheme();
+        themeInitialized = true;
         ApplyTheme();
+        Activated += (sender, args) => RefreshSystemTheme();
 #if EMBEDDED_PACKAGE
         busy = true;
         SetState("Готуємо файли гри…");
@@ -233,19 +248,59 @@ internal sealed class WebPuzzleLauncher : Form
         }
     }
 
-    private void ChangeTheme(bool useDark)
+    protected override void WndProc(ref Message message)
     {
-        if (dark == useDark) return;
-        dark = useDark;
+        base.WndProc(ref message);
+        if (message.Msg == SettingsChanged || message.Msg == WindowsThemeChanged) RefreshSystemTheme();
+    }
+
+    private void RefreshSystemTheme()
+    {
+        if (!themeInitialized || IsDisposed || themeMode != ThemeMode.System) return;
+        var systemDark = ResolveDarkTheme();
+        if (systemDark == dark) return;
+        dark = systemDark;
+        ApplyTheme();
+    }
+
+    private bool ResolveDarkTheme()
+    {
+        if (themeMode != ThemeMode.System) return themeMode == ThemeMode.Dark;
+        try
+        {
+            var preference = Registry.GetValue(
+                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+                "AppsUseLightTheme", 1);
+            return preference is int && (int)preference == 0;
+        }
+        catch (System.Security.SecurityException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+        catch (IOException) { return false; }
+    }
+
+    private void ChangeTheme(ThemeMode mode)
+    {
+        if (themeMode == mode) return;
+        themeMode = mode;
+        dark = ResolveDarkTheme();
         ApplyTheme();
         SaveTheme();
     }
 
-    private bool LoadTheme()
+    private ThemeMode LoadTheme()
     {
-        try { return File.Exists(themePath) && File.ReadAllText(themePath) == "dark"; }
-        catch (IOException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
+        try
+        {
+            if (File.Exists(themePath))
+            {
+                var saved = File.ReadAllText(themePath);
+                if (saved == "dark") return ThemeMode.Dark;
+                if (saved == "light") return ThemeMode.Light;
+            }
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        return ThemeMode.System;
     }
 
     private void SaveTheme()
@@ -253,7 +308,7 @@ internal sealed class WebPuzzleLauncher : Form
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(themePath));
-            File.WriteAllText(themePath, dark ? "dark" : "light");
+            File.WriteAllText(themePath, themeMode.ToString().ToLowerInvariant());
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
@@ -280,11 +335,12 @@ internal sealed class WebPuzzleLauncher : Form
         status.ForeColor = muted;
         statusDot.ForeColor = dark ? Color.FromArgb(187, 213, 189) : Color.FromArgb(40, 78, 62);
         themeLabel.ForeColor = text;
-        lightTheme.Checked = !dark;
-        darkTheme.Checked = dark;
+        systemTheme.Checked = themeMode == ThemeMode.System;
+        lightTheme.Checked = themeMode == ThemeMode.Light;
+        darkTheme.Checked = themeMode == ThemeMode.Dark;
         var selected = dark ? Color.FromArgb(187, 213, 189) : Color.FromArgb(210, 225, 207);
         var selectedText = Color.FromArgb(32, 54, 44);
-        foreach (var option in new[] { lightTheme, darkTheme })
+        foreach (var option in new[] { systemTheme, lightTheme, darkTheme })
         {
             ConfigureButton(option, chrome, option.Checked ? selectedText : text, option.Checked ? selected : hover, border);
             option.FlatAppearance.CheckedBackColor = selected;
