@@ -42,7 +42,10 @@ export class ColyseusRoomGateway implements RoomGateway {
   private stopInvite(room:Room){
     clearInterval(this.inviteHeartbeat);this.inviteHeartbeat=undefined;this.reportInvite(room,false);
   }
-  private readonly client=new Client(`${location.protocol==="https:"?"wss:":"ws:"}//${location.host}/realtime`);
+  private readonly client = new Client(
+    document.querySelector('meta[name="webpuzzle-realtime"]') ? location.origin
+      : `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/realtime`,
+  );
   private async savedRoom(key: string): Promise<string | null> {
     const response = await fetch(`/api/saves/${encodeURIComponent(key)}`, { signal: AbortSignal.timeout(5000), cache: "no-store" });
     if (!response.ok) throw new Error("Save unavailable");
