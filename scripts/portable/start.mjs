@@ -25,7 +25,7 @@ async function localGame() {
     const response = await fetch(new URL("api/health", probeAddress), { signal: AbortSignal.timeout(1200) });
     if (!response.ok) return false;
     const status = await response.json();
-    if (status.service !== "web-pazle-server" || status.maxPlayers !== MAX_ROOM_PLAYERS) return false;
+    if (status.service !== "web-pazle-server" || status.maxPlayers !== MAX_ROOM_PLAYERS || !status.launcherArtwork) return false;
     const page = await fetch(probeAddress, { signal: AbortSignal.timeout(1200) });
     return page.ok && (await page.text()).includes("<title>WebPuzzle</title>");
   } catch { return false; }

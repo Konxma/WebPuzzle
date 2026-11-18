@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { DEFAULT_IMAGE_ID, puzzleImageUrl, puzzleSeamPath, type PuzzleShape } from "@web-pazle/shared";
+import { puzzleImageUrl, puzzleSeamPath, type PuzzleShape } from "@web-pazle/shared";
 import { PuzzlePreviewCanvas, type PreviewCamera } from "./PuzzlePreviewCanvas";
 import { pieceNoun } from "../../../shared/format";
 
@@ -8,6 +8,7 @@ interface PreviewProps {
   shape: PuzzleShape;
   shapeLabel: string;
   name: string;
+  defaultImageId: string;
   customPhoto: boolean;
   photo: File | null;
 }
@@ -38,7 +39,7 @@ function stepScale(scale: number, direction: 1 | -1): number {
     : [...ZOOM_LEVELS].reverse().find(level => level < scale - .001) ?? 1;
 }
 
-export function PuzzlePreview({ pieceCount, shape, shapeLabel, name, customPhoto, photo }: PreviewProps) {
+export function PuzzlePreview({ pieceCount, shape, shapeLabel, name, defaultImageId, customPhoto, photo }: PreviewProps) {
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [camera, setCamera] = useState(FULL_VIEW);
   const [dragging, setDragging] = useState(false);
@@ -46,7 +47,7 @@ export function PuzzlePreview({ pieceCount, shape, shapeLabel, name, customPhoto
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
   const boardId = useId();
   const outline = useMemo(() => puzzleSeamPath(pieceCount, 42, shape), [pieceCount, shape]);
-  const imageUrl = customPhoto ? photoUrl : puzzleImageUrl(DEFAULT_IMAGE_ID);
+  const imageUrl = customPhoto ? photoUrl : puzzleImageUrl(defaultImageId);
   const zoomed = camera.scale > 1;
 
   useEffect(() => {

@@ -1,3 +1,4 @@
+import { isPuzzleFileId } from "@web-pazle/shared";
 import { useEffect, useLayoutEffect, useState, useSyncExternalStore } from "react";
 import { LobbyView } from "../features/lobby/views/LobbyView";
 import { LobbyViewModel } from "../features/lobby/viewmodels/LobbyViewModel";
@@ -11,7 +12,9 @@ import { PuzzlePhotos } from "../infrastructure/http/PuzzlePhotos";
 import { BrowserPuzzleViewPreferences } from "../infrastructure/http/BrowserPuzzleViewPreferences";
 const saves = new BrowserSavedPuzzles();
 const puzzle=new PuzzleViewModel(new ColyseusRoomGateway(),copyInvite,saves,new BrowserPuzzleViewPreferences());
-const lobby=new LobbyViewModel(new HttpHealthGateway(),{create:puzzle.create,join:puzzle.join,resume:puzzle.resume},new PuzzlePhotos(),saves);
+const launcherImage = document.querySelector<HTMLMetaElement>('meta[name="webpuzzle-launcher-image"]')?.content;
+const lobby=new LobbyViewModel(new HttpHealthGateway(),{create:puzzle.create,join:puzzle.join,resume:puzzle.resume},new PuzzlePhotos(),saves,
+  isPuzzleFileId(launcherImage) ? launcherImage : undefined);
 let initialized=false;
 const themeKey = "webpazle-theme";
 export function App(){

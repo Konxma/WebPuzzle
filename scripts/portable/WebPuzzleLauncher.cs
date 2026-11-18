@@ -2,7 +2,6 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
@@ -17,9 +16,14 @@ internal sealed class WebPuzzleLauncher : Form
 #endif
     private readonly string address = "http://localhost:" +
         (Environment.GetEnvironmentVariable("WEBPUZZLE_PORT") ?? "5174") + "/";
-    private readonly string themePath = Path.Combine(
+    private static readonly string AppDirectory = Path.Combine(
         Environment.GetEnvironmentVariable("LOCALAPPDATA") ??
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WebPuzzle", "launcher-theme");
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WebPuzzle");
+    private readonly string themePath = Path.Combine(AppDirectory, "launcher-theme");
+    private readonly LauncherArtwork artwork = new LauncherArtwork(AppDirectory);
+    private readonly PictureBox banner = new PictureBox { SizeMode = PictureBoxSizeMode.StretchImage };
+    private readonly LauncherButton choosePhoto = new LauncherButton();
+    private readonly LauncherButton resetPhoto = new LauncherButton();
     private readonly Panel titleBar = new Panel();
     private readonly Button theme = new LauncherButton();
     private readonly Button minimize = new LauncherButton();
@@ -100,8 +104,16 @@ internal sealed class WebPuzzleLauncher : Form
         close.Click += (sender, args) => Close();
         titleBar.Controls.AddRange(new Control[] { theme, minimize, close });
 
-        var banner = CreateBanner();
         banner.SetBounds(1, 41, 432, 164);
+        banner.Disposed += (sender, args) => { if (banner.Image != null) banner.Image.Dispose(); };
+        choosePhoto.SetBounds(206, 228, 114, 32);
+        choosePhoto.Text = "Змінити фото";
+        choosePhoto.Click += (sender, args) => PickPhoto();
+        resetPhoto.SetBounds(327, 228, 82, 32);
+        resetPhoto.Text = "Скинути";
+        resetPhoto.AccessibleName = "Повернути «Тиху затоку»";
+        resetPhoto.Click += (sender, args) => EditArtwork(() => artwork.Reset(), "Тиху затоку відновлено.");
+        RefreshBanner();
         var title = new Label {
             Text = "WebPuzzle", AutoSize = true, Location = new Point(23, 221),
             Font = new Font(Font.FontFamily, 23, FontStyle.Bold)
@@ -135,7 +147,7 @@ internal sealed class WebPuzzleLauncher : Form
             StopServer();
             SetState("Гру зупинено.");
         };
-        Controls.AddRange(new Control[] { titleBar, banner, title, statusDot, status, play, stop });
+        Controls.AddRange(new Control[] { titleBar, banner, title, choosePhoto, resetPhoto, statusDot, status, play, stop });
         AcceptButton = play;
         dark = LoadTheme();
         ApplyTheme();
@@ -169,16 +181,41 @@ internal sealed class WebPuzzleLauncher : Form
     }
 #endif
 
-    private static PictureBox CreateBanner()
+    private void RefreshBanner()
     {
-        var banner = new PictureBox { SizeMode = PictureBoxSizeMode.StretchImage };
-        Bitmap bitmap;
-        using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream("WebPuzzle.Banner"))
-        using (var image = Image.FromStream(stream))
-            bitmap = new Bitmap(image);
-        banner.Image = bitmap;
-        banner.Disposed += (sender, args) => bitmap.Dispose();
-        return banner;
+        var previous = banner.Image;
+        bool custom;
+        banner.Image = artwork.Banner(out custom);
+        if (previous != null) previous.Dispose();
+        resetPhoto.Visible = custom;
+        choosePhoto.Left = custom ? 206 : 295;
+    }
+
+    private void PickPhoto()
+    {
+        using (var dialog = new OpenFileDialog {
+            Title = "Зображення для пазла", Filter = "Зображення JPG і PNG|*.jpg;*.jpeg;*.png"
+        })
+        {
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+                EditArtwork(() => artwork.Choose(dialog.FileName), "Фото вибрано. Воно з’явиться в браузері.");
+        }
+    }
+
+    private void EditArtwork(Action edit, string message)
+    {
+        try
+        {
+            edit();
+            RefreshBanner();
+            SetState(ready ? message + " Оновіть сторінку гри." : message);
+        }
+        catch (Exception error)
+        {
+            if (!(error is IOException || error is ArgumentException || error is InvalidDataException ||
+                error is UnauthorizedAccessException || error is ExternalException)) throw;
+            SetState("Не вдалося змінити фото. Виберіть інше JPG або PNG до 25 МБ.");
+        }
     }
 
     protected override CreateParams CreateParams
@@ -239,8 +276,12 @@ internal sealed class WebPuzzleLauncher : Form
         ConfigureButton(play, PlayColor(), dark ? Color.FromArgb(26, 40, 29) : Color.White,
             dark ? Color.FromArgb(210, 230, 211) : Color.FromArgb(52, 95, 77), border);
         ConfigureButton(stop, surface, text, hover, border);
+        ConfigureButton(choosePhoto, surface, text, hover, border);
+        ConfigureButton(resetPhoto, surface, text, hover, border);
         play.DisabledColor = muted;
         stop.DisabledColor = muted;
+        choosePhoto.DisabledColor = muted;
+        resetPhoto.DisabledColor = muted;
         statusDot.Invalidate();
     }
 
@@ -262,6 +303,8 @@ internal sealed class WebPuzzleLauncher : Form
         play.BackColor = PlayColor();
         play.Text = ready ? "Відкрити гру" : "Грати";
         play.Enabled = !busy;
+        choosePhoto.Enabled = !busy;
+        resetPhoto.Enabled = !busy;
         stop.Enabled = !busy && ready && server != null;
     }
 

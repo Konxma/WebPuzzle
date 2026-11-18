@@ -77,7 +77,7 @@ try {
 
   $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
   $banner = Join-Path $PSScriptRoot 'portable/quiet-bay-banner.png'
-  & $compiler /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/resource:$banner,WebPuzzle.Banner" "/out:$stage/WebPuzzle.exe" (Join-Path $PSScriptRoot 'portable/WebPuzzleLauncher.cs')
+  & $compiler /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/resource:$banner,WebPuzzle.Banner" "/out:$stage/WebPuzzle.exe" (Join-Path $PSScriptRoot 'portable/WebPuzzleLauncher.cs') (Join-Path $PSScriptRoot 'portable/LauncherArtwork.cs')
   if ($LASTEXITCODE -ne 0) { throw 'Windows launcher build failed.' }
 
   Add-Type -AssemblyName System.IO.Compression.FileSystem

@@ -1,6 +1,6 @@
 import {
   DEMO_PIECE_COUNT, MIN_PIECE_COUNT, MAX_PIECE_COUNT,
-  isValidPieceCount, DEFAULT_PUZZLE_SHAPE, type PuzzleShape,
+  isValidPieceCount, DEFAULT_IMAGE_ID, DEFAULT_PUZZLE_SHAPE, type PuzzleShape,
 } from "@web-pazle/shared";
 import { ObservableViewModel } from "../../../shared/mvvm/ObservableViewModel";
 import type { HealthGateway } from "../models/HealthGateway";
@@ -15,6 +15,7 @@ interface LobbyState {
   maxPieceCount: number;
   shape: PuzzleShape;
   imageSource: "default" | "photo";
+  defaultImageId: string;
   roomCode: string;
   roomCodeError: string | null;
   photo: File | null;
@@ -30,12 +31,12 @@ export class LobbyViewModel extends ObservableViewModel<LobbyState> {
   private uploadedPhoto?: { file: File; id: string };
   constructor(private readonly health: HealthGateway,
     private readonly rooms: {create:(count:number,imageId?:string,shape?:PuzzleShape)=>Promise<void>;join:(id:string)=>Promise<void>;resume:(key:string)=>Promise<void>},
-    private readonly photos: PuzzlePhotoGateway, private readonly saves: SavedPuzzleCatalog) {
+    private readonly photos: PuzzlePhotoGateway, private readonly saves: SavedPuzzleCatalog, defaultImageId = DEFAULT_IMAGE_ID) {
     super({
       connection: "idle", pieceCount: DEMO_PIECE_COUNT,
       pieceCountInput: String(DEMO_PIECE_COUNT), pieceCountError: null,
       minPieceCount: MIN_PIECE_COUNT, maxPieceCount: MAX_PIECE_COUNT,
-      shape: DEFAULT_PUZZLE_SHAPE, imageSource: "default", roomCode: "", roomCodeError: null,
+      shape: DEFAULT_PUZZLE_SHAPE, imageSource: "default", defaultImageId, roomCode: "", roomCodeError: null,
       photo: null, photoError: null, busy: false, savedPuzzles: [], saveDetails: {}, saveError: null, removingSave: false,
     });
   }
@@ -102,11 +103,11 @@ export class LobbyViewModel extends ObservableViewModel<LobbyState> {
     if (!this.getSnapshot().busy) void this.rooms.resume(key);
   };
   readonly createRoom = async (): Promise<void> => {
-    const { pieceCount, pieceCountError, imageSource, photo, shape, busy } = this.getSnapshot();
+    const { pieceCount, pieceCountError, imageSource, defaultImageId, photo, shape, busy } = this.getSnapshot();
     if (pieceCountError || busy || (imageSource === "photo" && !photo)) return;
     this.setState({ ...this.getSnapshot(), busy: true, photoError: null });
     try {
-      let imageId: string | undefined;
+      let imageId = defaultImageId;
       if (imageSource === "photo" && photo) {
         if (this.uploadedPhoto?.file !== photo) this.uploadedPhoto = { file: photo, id: await this.photos.upload(photo) };
         imageId = this.uploadedPhoto.id;

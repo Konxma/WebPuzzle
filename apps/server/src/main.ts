@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { Server } from "@colyseus/core";
 import { WebSocketTransport } from "@colyseus/ws-transport";
 import { MAX_ROOM_PLAYERS } from "@web-pazle/shared";
+import { puzzleLibrary } from "./infrastructure/PuzzleLibrary.js";
 import { PuzzleRoom } from "./transport/realtime/PuzzleRoom.js";
 import { portableHome, portableLanOrigin, servePortableAsset } from "./transport/http/portableSite.js";
 import { deleteSave, getPhoto, getSaveStatus, uploadPhoto } from "./transport/http/puzzleLibraryRoutes.js";
@@ -18,14 +19,16 @@ const server=new Server({
   }),
   greet:false,
   express:app=>{
-    app.get("/api/health",(_request:IncomingMessage,response:ServerResponse)=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({status:"ok",service:"web-pazle-server",boardActions:true,undoArrange:true,maxPlayers:MAX_ROOM_PLAYERS}));});
+    app.get("/api/health",(_request:IncomingMessage,response:ServerResponse)=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({status:"ok",service:"web-pazle-server",boardActions:true,undoArrange:true,maxPlayers:MAX_ROOM_PLAYERS,launcherArtwork:!!homePage}));});
     app.post("/api/photos", uploadPhoto);
     app.get("/api/photos/:id", getPhoto);
     app.get("/api/saves/:id", getSaveStatus);
     app.delete("/api/saves/:id", deleteSave);
     if (clientDir && homePage) {
       app.get("/", (_request: IncomingMessage, response: ServerResponse) => {
-        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" }).end(homePage);
+        const imageId = puzzleLibrary.launcherImageId();
+        const page = imageId ? homePage.replace("</head>", `<meta name="webpuzzle-launcher-image" content="${imageId}"/></head>`) : homePage;
+        response.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" }).end(page);
       });
       app.get(/^\/(assets|art)\//, (request: IncomingMessage, response: ServerResponse) => servePortableAsset(clientDir, request, response));
       app.get("/api/lan-origin", (_request: IncomingMessage, response: ServerResponse) => {

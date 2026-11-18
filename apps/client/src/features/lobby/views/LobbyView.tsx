@@ -46,7 +46,8 @@ export function LobbyView({ viewModel, ...theme }: { viewModel: LobbyViewModel }
   }
   const busyCreating = state.busy && !state.removingSave;
   const customPhoto = state.imageSource === "photo";
-  const previewName = customPhoto ? state.photo?.name || "Власне фото" : "Тиха затока";
+  const defaultName = state.defaultImageId === DEFAULT_IMAGE_ID ? "Тиха затока" : "Фото з лаунчера";
+  const previewName = customPhoto ? state.photo?.name || "Власне фото" : defaultName;
   useEffect(() => {
     const dialog = deleteDialog.current;
     if (puzzleToDelete && dialog && !dialog.open) dialog.showModal();
@@ -93,7 +94,7 @@ export function LobbyView({ viewModel, ...theme }: { viewModel: LobbyViewModel }
             <legend>Налаштування пазла</legend>
             <div className="setup-options" role="group" aria-label="Зображення">
               <button type="button" className="button secondary-button" aria-pressed={!customPhoto}
-                onClick={() => viewModel.setImageSource("default")}>Тиха затока</button>
+                onClick={() => viewModel.setImageSource("default")}>{defaultName}</button>
               <button type="button" className="button secondary-button" aria-pressed={customPhoto}
                 onClick={() => viewModel.setImageSource("photo")}>Власне фото</button>
             </div>
@@ -145,7 +146,7 @@ export function LobbyView({ viewModel, ...theme }: { viewModel: LobbyViewModel }
           </fieldset>
         </div>
         <PuzzlePreview pieceCount={state.pieceCount} shape={state.shape} shapeLabel={shapeLabels[state.shape]}
-          name={previewName} customPhoto={customPhoto} photo={customPhoto ? state.photo : null}/>
+          name={previewName} defaultImageId={state.defaultImageId} customPhoto={customPhoto} photo={customPhoto ? state.photo : null}/>
         <div className="lobby-access">
           <div className="connection-actions">
             <button className="button quiet-button" onClick={viewModel.checkConnection} disabled={state.connection === "checking"}>

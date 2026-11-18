@@ -61,6 +61,14 @@ export const puzzleLibrary = {
   hasImage(id: unknown): id is string {
     return id === DEFAULT_IMAGE_ID || isPuzzleFileId(id) && existsSync(file("photos", id, "jpg"));
   },
+  launcherImageId() {
+    try {
+      const id = readFileSync(join(directory, "launcher-photo"), "utf8").trim();
+      return isPuzzleFileId(id) && this.hasImage(id) ? id : undefined;
+    } catch {
+      return undefined;
+    }
+  },
   addPhoto(bytes: Buffer) {
     const id = randomUUID();
     mkdirSync(join(directory, "photos"), { recursive: true });
