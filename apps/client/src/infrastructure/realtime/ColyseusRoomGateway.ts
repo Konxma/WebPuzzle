@@ -2,6 +2,35 @@ import { Client, CloseCode, type Room } from "@colyseus/sdk";
 import { ROOM_KICK_REASON, type RoomCommand, type ServerEvent, type RoomSnapshot, type GameDelta, type PlayerInfo, type BoardMarker, type BoardActionResult } from "@web-pazle/shared";
 import type { RoomGateway, RoomOptions } from "../../features/puzzle/models/RoomGateway";
 import { InviteAddress } from "../http/InviteAddress";
+const tokenKey = (roomId: string) => "puzzle:" + roomId;
+type SavedSeat = { token: string; validUntil: number };
+
+function savedSeat(roomId: string): SavedSeat | null {
+  try {
+    const seat = JSON.parse(localStorage.getItem(tokenKey(roomId)) ?? "null");
+    return typeof seat?.token === "string" && seat.validUntil > Date.now() ? seat : null;
+  } catch { return null; }
+}
+
+function rememberSeat(room: Room) {
+  const key = tokenKey(room.roomId);
+  try { sessionStorage.setItem(key, room.reconnectionToken); } catch { /* Storage can be disabled. */ }
+  try {
+    const seat: SavedSeat = { token: room.reconnectionToken, validUntil: Date.now() + 5 * 60_000 };
+    localStorage.setItem(key, JSON.stringify(seat));
+  } catch { /* The tab token still works. */ }
+}
+
+function forgetSeat(room: Room) {
+  const key = tokenKey(room.roomId);
+  try {
+    if (sessionStorage.getItem(key) === room.reconnectionToken) sessionStorage.removeItem(key);
+  } catch { /* Storage can be disabled. */ }
+  try {
+    if (savedSeat(room.roomId)?.token === room.reconnectionToken) localStorage.removeItem(key);
+  } catch { /* Storage can be disabled. */ }
+}
+
 export class ColyseusRoomGateway implements RoomGateway {
   private room:Room|null=null;
   private readonly inviteAddress=new InviteAddress(location.origin);
@@ -24,13 +53,19 @@ export class ColyseusRoomGateway implements RoomGateway {
     let room:Room|undefined;
     const roomId = options.saveKey ? await this.savedRoom(options.saveKey) : options.roomId;
     if(roomId){
-      const token=sessionStorage.getItem("puzzle:"+roomId);
-      if(token)try{room=await this.client.reconnect(token);}catch{sessionStorage.removeItem("puzzle:"+roomId);}
-      if (!room) {
+      let token = savedSeat(roomId)?.token;
+      try { token = sessionStorage.getItem(tokenKey(roomId)) ?? token; } catch { /* Use the saved seat. */ }
+      const deadline = Date.now() + 12_000;
+      while (!room) {
+        if (token) try { room = await this.client.reconnect(token); } catch { /* The old socket may still be closing. */ }
+        if (room) break;
         try { room = await this.client.joinById(roomId); }
         catch (error) {
           // The previous room can disappear between the lookup and the join.
-          if (!options.saveKey || await this.savedRoom(options.saveKey)) throw error;
+          if (options.saveKey && !await this.savedRoom(options.saveKey)) break;
+          const locked = error instanceof Error && /room .* is locked/i.test(error.message);
+          if (!token || !locked || Date.now() >= deadline) throw error;
+          await new Promise(resolve => setTimeout(resolve, 1_000));
         }
       }
     }
@@ -40,11 +75,12 @@ export class ColyseusRoomGateway implements RoomGateway {
     this.reportInvite(room,true);
     const activeRoom=room;
     this.inviteHeartbeat=setInterval(()=>{
+      if (activeRoom.connection.isOpen) rememberSeat(activeRoom);
       this.reportInvite(activeRoom,true);
       const before=this.shareUrl(activeRoom.roomId);
       void this.refreshShareUrl(activeRoom.roomId).then(after=>{if(this.room===activeRoom&&before!==after)onInviteChanged?.();});
     },10000);
-    sessionStorage.setItem("puzzle:"+room.roomId,room.reconnectionToken);
+    rememberSeat(room);
     room.onMessage("snapshot",(snapshot:RoomSnapshot)=>listener({type:"snapshot",snapshot}));
     room.onMessage("delta",(delta:GameDelta)=>listener({type:"delta",delta}));
     room.onMessage("motion",(group:{id:string;dx:number;dy:number;owner:string|null})=>listener({type:"motion",group}));
@@ -54,12 +90,12 @@ export class ColyseusRoomGateway implements RoomGateway {
     room.onMessage("save-error",(message:string)=>listener({type:"error",message}));
     room.onError(()=>listener({type:"error",message:"Помилка з’єднання з кімнатою"}));
     room.onDrop(()=>onConnection(false));
-    room.onReconnect(()=>{onConnection(true);room.send("sync");sessionStorage.setItem("puzzle:"+room.roomId,room.reconnectionToken);});
+    room.onReconnect(()=>{onConnection(true);room.send("sync");rememberSeat(room);});
     room.onLeave((code, reason) => {
       if (this.room !== activeRoom) return;
       this.stopInvite(activeRoom);
       this.room = null;
-      sessionStorage.removeItem("puzzle:" + activeRoom.roomId);
+      if (code === CloseCode.CONSENTED || reason === ROOM_KICK_REASON) forgetSeat(activeRoom);
       onConnection(false);
       if (reason === ROOM_KICK_REASON) {
         listener({ type: "closed", message: "Власник видалив вас із кімнати." });
@@ -72,7 +108,7 @@ export class ColyseusRoomGateway implements RoomGateway {
     room.send("sync");
   }
   send(command:RoomCommand){this.room?.send("command",command);}
-  async leave(){if(this.room){const room=this.room;this.stopInvite(room);sessionStorage.removeItem("puzzle:"+room.roomId);await room.leave();this.room=null;}}
+  async leave(){if(this.room){const room=this.room;this.stopInvite(room);forgetSeat(room);await room.leave();this.room=null;}}
   shareUrl(roomId:string){return this.inviteAddress.url(roomId);}
   async refreshShareUrl(roomId:string){await this.inviteAddress.refresh();return this.shareUrl(roomId);}
 }

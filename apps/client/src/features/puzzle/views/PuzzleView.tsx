@@ -1,5 +1,6 @@
+import { QRCodeCanvas } from "qrcode.react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { DEFAULT_IMAGE_ID, isPuzzleTray, BOARD_MARKER_DURATION, MAX_PUZZLE_TRAYS, MAX_TRAY_NAME_LENGTH, puzzleImageUrl, type BoardMarkerDuration, type PuzzleFeatures, type PuzzleTray, type Tile } from "@web-pazle/shared";
+import { DEFAULT_IMAGE_ID, isPuzzleTray, BOARD_MARKER_DURATION, MAX_ROOM_PLAYERS, MAX_PUZZLE_TRAYS, MAX_TRAY_NAME_LENGTH, puzzleImageUrl, type BoardMarkerDuration, type PuzzleFeatures, type PuzzleTray, type Tile } from "@web-pazle/shared";
 import type { PuzzleViewModel } from "../viewmodels/PuzzleViewModel";
 import type { BoardControls, PuzzleRenderer } from "../rendering/PuzzleRenderer";
 import { Icon } from "../../../shared/ui/Icon";
@@ -63,7 +64,8 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
   const [trayRename, setTrayRename] = useState<{ id: PuzzleTray; name: string; error: boolean } | null>(null);
   const [trayToDelete, setTrayToDelete] = useState<PuzzleTray | null>(null);
   const [dropTarget, setDropTarget] = useState<PuzzleTray | null | undefined>(undefined);
-  const [controls, setControls] = useState<BoardControls>({ cameraLocked: false, clickToCarry: true });
+  const [touchControls] = useState(() => window.matchMedia("(any-pointer: coarse)").matches);
+  const [controls, setControls] = useState<BoardControls>({ cameraLocked: false, clickToCarry: !touchControls });
   const currentControls = useRef(controls);
 
   function toggleControl(control: keyof BoardControls) {
@@ -84,7 +86,8 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
   }
   const [pointing, setPointing] = useState(false);
   const [renderError,setRenderError]=useState("");
-  const [panelOpen, setPanelOpen] = useState(true);
+  const [qrOpen, setQrOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(() => !window.matchMedia("(max-width: 900px), (pointer: coarse)").matches);
   const [extrasMode, setExtrasMode] = useState<"open" | "collapsed" | "closed">("open");
   const [fullscreen, setFullscreen] = useState(false);
   const [fullscreenError, setFullscreenError] = useState("");
@@ -147,8 +150,14 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
   if(state.screen!=="game")return <main className="game-message">
     <span className="brand">WebPuzzle</span><h1>{state.screen==="connecting"?"Відкриваємо стіл…":"Кімната недоступна"}</h1>
     <p role="status">{state.error??"Готуємо деталі та підключення"}</p>
-    <button className="button primary-button" onClick={()=>void vm.leave()}>На головну</button>
+    <div className="game-message-actions">
+      {state.screen === "error" && state.roomId && <button type="button" className="button primary-button"
+        onClick={() => void vm.join(state.roomId)}>Спробувати ще раз</button>}
+      <button type="button" className="button secondary-button" onClick={()=>void vm.leave()}>На головну</button>
+    </div>
   </main>;
+  const canScanInvite = !!state.shareUrl && !/^https?:\/\/(?:localhost|127\.|\[::1\])/i.test(state.shareUrl);
+  const freeSeats = Math.max(0, MAX_ROOM_PLAYERS - state.players.length);
   const percent=Math.round(state.placed/state.pieceCount*100);
   const trays = [{ id: null, label: "Стіл" },
     ...state.trays.map((id, index) => ({ id, label: state.trayNames[id] ?? `Лоток ${index + 1}` }))];
@@ -185,11 +194,11 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
         }}/>
         <div className="board-menu" ref={boardMenu} popover="auto" role="group" aria-label="Керування столом"
           onKeyDown={event => { if (event.key === "Escape") event.stopPropagation(); }}>
-          <button type="button" className="board-menu-toggle" aria-pressed={controls.clickToCarry}
+          {!touchControls && <button type="button" className="board-menu-toggle" aria-pressed={controls.clickToCarry}
             onClick={() => toggleControl("clickToCarry")}>
             Перенесення кліками
             {controls.clickToCarry && <Icon name="check"/>}
-          </button>
+          </button>}
           <button type="button" onClick={() => toggleControl("cameraLocked")}>
             {controls.cameraLocked ? "Розблокувати вид" : "Зафіксувати вид"}
           </button>
@@ -281,7 +290,7 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
         {(pointing || (state.marker && !state.marker.local) || state.boardNotice) && <div className="board-feedback">
           {pointing && <p role="status">Клацни по плитці або по столу, щоб показати місце напарнику</p>}
           {state.marker && !state.marker.local && <div className="board-marker-notice">
-            <span className="board-marker-label" role="status"><Icon name="mapPin"/> Напарник позначив місце</span>
+            <span className="board-marker-label" role="status"><Icon name="mapPin"/> Гравець позначив місце</span>
             <button type="button" className="button quiet-button" disabled={controls.cameraLocked}
               onClick={() => {
                 const marker = state.marker;
@@ -318,7 +327,7 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
             </>}
             <div className="marker-settings">
               <div className="marker-duration">
-                <span id="marker-duration-label">Час показу мітки напарнику</span>
+                <span id="marker-duration-label">Час показу мітки іншим гравцям</span>
                 <div className="marker-duration-options" role="group" aria-labelledby="marker-duration-label">
                   {([BOARD_MARKER_DURATION, 10000] as const).map(duration =>
                     <button key={duration} type="button" aria-pressed={markerDurationDraft === duration}
@@ -327,7 +336,7 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
                     </button>)}
                 </div>
               </div>
-              <label className="puzzle-feature">
+              {!touchControls && <><label className="puzzle-feature">
                 Мітка з клавіатури
                 <input type="checkbox" role="switch" checked={markerShortcutDraft} disabled={savingFeatures}
                   onChange={event => setMarkerShortcutDraft(event.target.checked)}/>
@@ -348,7 +357,7 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
                       setCapturingMarkerKey(false);
                     }
                   }}><kbd>{capturingMarkerKey ? "…" : markerKeyDraft}</kbd></button>
-              </div>}
+              </div>}</>}
             </div>
             <details className="puzzle-cheats">
               <summary>Чіти <Icon name="chevronDown"/></summary>
@@ -434,7 +443,7 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
         </dialog>
       </section>
       <aside className="game-sidebar" id="room-panel" aria-label="Панель кімнати" hidden={!panelOpen}>
-        <div><p className="panel-label">Ваша кімната</p><h2>Збираємо разом</h2><p className="sidebar-copy">{state.players.length<2?"Запросіть друга за посиланням — для нього є друге місце":"Ви за одним столом. Кожен може брати вільні деталі"}</p></div>
+        <div><p className="panel-label">Ваша кімната · {state.players.length}/{MAX_ROOM_PLAYERS}</p><h2>Збираємо разом</h2><p className="sidebar-copy">{freeSeats ? "Запросіть друзів за посиланням або QR-кодом." : "Ви за одним столом. Кожен може брати вільні деталі."}</p></div>
         <div className="players-list">
           {state.players.map(player => <div key={player.id}>
             <div className="player-row">
@@ -455,15 +464,28 @@ export function PuzzleView({viewModel:vm, ...theme}:{viewModel:PuzzleViewModel} 
               </div>
             </div>}
           </div>)}
-          {state.players.length < 2 && <div className="player-row empty-seat">Друге місце вільне</div>}
+          {freeSeats > 0 && <div className="player-row empty-seat">
+            {freeSeats === 1 ? "Вільне місце" : `Вільних місць: ${freeSeats}`}
+          </div>}
         </div>
-        <label className="panel-label" htmlFor="invite-url">Посилання для друга</label>
+        <label className="panel-label" htmlFor="invite-url">Посилання для гравців</label>
         <input id="invite-url" className="invite-input" readOnly value={state.shareUrl} placeholder="Визначаємо локальну адресу…" onFocus={event=>event.currentTarget.select()}/>
         <button className="button primary-button" onClick={()=>void vm.copyInvite()}>{state.inviteCopied?"Посилання скопійовано":"Копіювати посилання"}</button>
+        {canScanInvite && <details className="room-qr" open={qrOpen} onToggle={event => setQrOpen(event.currentTarget.open)}>
+          <summary>QR-код запрошення <Icon name="chevronDown"/></summary>
+          {qrOpen && <div className="room-qr-body">
+            <QRCodeCanvas value={state.shareUrl} size={176} marginSize={4} level="M"
+              role="img" aria-label="QR-код для входу в кімнату"/>
+            <p>Скануйте камерою телефона в тій самій мережі Wi-Fi.</p>
+          </div>}
+        </details>}
         <div className="progress-panel"><div><span>На своїх місцях</span><span>{percent}%</span></div><progress max={state.pieceCount} value={state.placed}/><small>{state.placed} / {state.pieceCount}</small></div>
-        <button className="button secondary-button" onClick={vm.toggleReference}>{state.showReference?"Сховати зразок":"Показати зразок"}</button>
-        <div className="instructions"><p>Потягніть деталь до її сусіда або до місця в рамці</p><p>{controls.cameraLocked ? "Вид зафіксовано" : <>Коліщатко — масштаб<br/>Порожній стіл — переміщення</>}</p>
-          {controls.clickToCarry && <p>Клікніть деталь, щоб узяти, і ще раз, щоб покласти. Esc повертає її назад.</p>}</div>
+        <button className="button secondary-button" onClick={() => {
+          vm.toggleReference();
+          if (!state.showReference && window.matchMedia("(max-width: 900px), (pointer: coarse)").matches) setPanelOpen(false);
+        }}>{state.showReference?"Сховати зразок":"Показати зразок"}</button>
+        <div className="instructions"><p>{touchControls ? "Торкніться деталі, перетягніть і відпустіть." : "Потягніть деталь до її сусіда або до місця в рамці"}</p><p>{controls.cameraLocked ? "Вид зафіксовано" : <>{touchControls ? "Два пальці — масштаб" : "Коліщатко — масштаб"}<br/>Порожній стіл — переміщення</>}</p>
+          {!touchControls && controls.clickToCarry && <p>Клікніть деталь, щоб узяти, і ще раз, щоб покласти. Esc повертає її назад.</p>}</div>
         {state.error&&<p className="field-error" role="alert">{state.error}</p>}
       </aside>
     </div>

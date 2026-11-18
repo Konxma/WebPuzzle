@@ -46,8 +46,12 @@ export class PuzzleRoom extends Room {
   }
   onJoin(client:Client){
     this.saveOwnerId ??= client.sessionId;
-    const taken=new Set([...this.players.values()].map(p=>p.name));
-    this.players.set(client.sessionId,{id:client.sessionId,name:taken.has("Гравець 1")?"Гравець 2":"Гравець 1",connected:true,isHost:this.players.size===0});
+    const taken = new Set([...this.players.values()].map(player => player.name));
+    let slot = 1;
+    while (taken.has(`Гравець ${slot}`)) slot++;
+    this.players.set(client.sessionId, {
+      id: client.sessionId, name: `Гравець ${slot}`, connected: true, isHost: this.players.size === 0,
+    });
     this.broadcast("players",[...this.players.values()]);
   }
   private sendSnapshot(client:Client){
@@ -58,6 +62,7 @@ export class PuzzleRoom extends Room {
   private publish(delta:GameDelta|null){if(delta&&(delta.groups.length||delta.removed.length||delta.trays||delta.trayNames||delta.features))this.broadcast("delta",delta);}
   private commit(delta: GameDelta | null) {
     if (!delta || (!delta.groups.length && !delta.trays && !delta.trayNames && !delta.features)) return;
+    this.publish(delta);
     if (this.saveKey) {
       try { puzzleLibrary.save(this.saveKey, this.engine.saveSnapshot()); }
       catch (error) {
@@ -65,7 +70,6 @@ export class PuzzleRoom extends Room {
         this.broadcast("save-error", "Не вдалося зберегти прогрес на ПК господаря.");
       }
     }
-    this.publish(delta);
   }
   private command(client:Client,payload:unknown){
     const now=Date.now();let rate=this.rates.get(client.sessionId);
@@ -108,7 +112,14 @@ export class PuzzleRoom extends Room {
     const {x,y}=payload.position;
     if(typeof x!=="number"||typeof y!=="number"||!Number.isFinite(x)||!Number.isFinite(y))return;
     // Motion sends coordinates only. Release may join groups or snap them into place.
-    if(payload.type==="move-group"){const delta=this.engine.move(id,client.sessionId,x,y);const group=delta?.groups[0];if(group)this.broadcast("motion",{id:group.id,dx:group.dx,dy:group.dy,owner:group.owner});}
+    if (payload.type === "move-group") {
+      const previous = this.engine.groups.get(id);
+      const dx = previous?.dx, dy = previous?.dy;
+      const group = this.engine.move(id, client.sessionId, x, y)?.groups[0];
+      if (group && (group.dx !== dx || group.dy !== dy)) {
+        this.broadcast("motion", { id: group.id, dx: group.dx, dy: group.dy, owner: group.owner }, { except: client });
+      }
+    }
     else if(payload.type==="release-group")this.commit(this.engine.release(id,client.sessionId,x,y));
     else if (payload.type === "stash-group" && "tray" in payload && (payload.tray === null || isPuzzleTray(payload.tray))) {
       this.commit(this.engine.stash(id, client.sessionId, payload.tray, x, y) ?? this.engine.releaseOwner(client.sessionId));
@@ -152,15 +163,16 @@ export class PuzzleRoom extends Room {
       ![...this.engine.groups.values()].some(group => (group.tray ?? null) === tray && group.pieces.includes(tileId)))) {
       return reply("unavailable");
     }
-    const partner = this.clients.find(peer => peer !== client && this.players.get(peer.sessionId)?.connected);
-    if (!partner) return reply("unavailable");
+    const peers = this.clients.filter(peer => peer !== client && this.players.get(peer.sessionId)?.connected);
+    if (!peers.length) return reply("unavailable");
     if (now - (this.lastMarker.get(client.sessionId) ?? 0) < 750) return reply("busy");
     this.lastMarker.set(client.sessionId, now);
     const duration = "duration" in payload && payload.duration === 10000 ? 10000 : undefined;
-    partner.send("board-marker", { position: { x, y }, tray,
+    const marker = { position: { x, y }, tray,
       ...(tileId === undefined ? {} : { tileId }),
       ...(duration === undefined ? {} : { duration }),
-    });
+    };
+    for (const peer of peers) peer.send("board-marker", marker);
     reply("done");
   }
   private kickPlayer(client: Client, playerId: string) {

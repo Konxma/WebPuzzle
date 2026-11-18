@@ -9,7 +9,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const children: ReturnType<typeof spawn>[] = [];
 const port = 5174;
 function printAddresses() {
-  console.log("\nWebPuzzle — гра для двох в одній локальній мережі.\nВІДКРИТИ ГРУ на цьому ПК:");
+  console.log("\nWebPuzzle — гра для трьох в одній локальній мережі.\nВІДКРИТИ ГРУ на цьому ПК:");
   for (const addresses of Object.values(networkInterfaces())) {
     for (const address of addresses ?? []) {
       if (address.family === "IPv4" && !address.internal && !address.address.startsWith("169.254.")) {
@@ -69,7 +69,9 @@ async function portAvailable() {
 async function backendReady() {
   try {
     const response = await fetch("http://127.0.0.1:3001/api/health", { signal: AbortSignal.timeout(1500) });
-    return response.ok && (await response.json()).undoArrange === true;
+    if (!response.ok) return false;
+    const status = await response.json();
+    return status.service === "web-pazle-server" && status.undoArrange === true && status.maxPlayers === 3;
   } catch { return false; }
 }
 function start(args: string[], cwd = root) {
@@ -92,7 +94,7 @@ process.on("SIGTERM", () => stop());
 async function main() {
 const running = await gameAlreadyRunning();
 if (running) {
-  if (running.undoArrange !== true) {
+  if (running.undoArrange !== true || running.maxPlayers !== 3) {
     console.log("Працює попередня версія WebPuzzle. Закрийте початкове вікно запуску гри, знову відкрийте Start.cmd та оновіть сторінку.");
     return;
   }

@@ -36,14 +36,16 @@ export class PuzzleViewModel extends ObservableViewModel<PuzzleScreenState>{
   resume=(saveKey:string)=>this.connect({saveKey});
   private async connect(options:RoomOptions){
     this.resetBoardAction();
-    this.setState({...this.getSnapshot(),screen:"connecting",error:null,marker:null,boardNotice:null,edgesOnly:false,trayView:null,showReference:false});
+    this.setState({...this.getSnapshot(),screen:"connecting",roomId:options.roomId ?? "",error:null,marker:null,boardNotice:null,edgesOnly:false,trayView:null,showReference:false});
     try{await this.gateway.connect(options,this.receive,connected=>{
       this.setState({...this.getSnapshot(),connected});if(!connected)this.notifyBoard();
     },()=>{
       const state=this.getSnapshot();
       if(state.screen==="game")this.setState({...state,shareUrl:this.gateway.shareUrl(state.roomId),inviteCopied:false});
-    });}catch{
-      const error = options.saveKey ? "Не вдалося відкрити збереження. Перевірте, чи гра запущена на тому самому ПК і чи в кімнаті є вільне місце."
+    });}catch(cause){
+      const locked = cause instanceof Error && /room .* is locked/i.test(cause.message);
+      const error = locked ? "У кімнаті зайняті всі місця. Якщо ти щойно повернувся, зачекай кілька секунд і спробуй ще раз."
+        : options.saveKey ? "Не вдалося відкрити збереження. Перевірте, чи гра запущена на тому самому ПК і чи в кімнаті є вільне місце."
         : "Не вдалося відкрити кімнату. Перевірте посилання: кімната може бути заповнена або вже закрита.";
       this.setState({...this.getSnapshot(),screen:"error",error});
     }
@@ -94,7 +96,8 @@ export class PuzzleViewModel extends ObservableViewModel<PuzzleScreenState>{
     else if (event.type === "board-action-result") this.receiveBoardAction(event.result);
     else if (event.type === "closed") {
       this.board = null;
-      this.setState({ ...state, screen: "error", roomId: "", connected: false, error: event.message });
+      this.setState({ ...state, screen: "error", connected: false, error: event.message,
+        roomId: event.message === "Власник видалив вас із кімнати." ? "" : state.roomId });
     }
     else if(event.type==="error")this.setState({...state,error:event.message});
   };
@@ -162,7 +165,7 @@ export class PuzzleViewModel extends ObservableViewModel<PuzzleScreenState>{
     const marker = this.pendingAction.type === "point-at";
     const undo = this.pendingAction.type === "undo-arrange";
     if (outcome === "busy") return this.showBoardNotice("Зачекай мить і спробуй ще раз");
-    if (outcome === "done") return this.showBoardNotice(marker ? "Позначку надіслано напарнику" :
+    if (outcome === "done") return this.showBoardNotice(marker ? "Позначку надіслано гравцям" :
       undo ? "Деталі повернуто на попередні місця" : "Вільні деталі розкладено");
     this.showBoardNotice(marker ? "Позначка недоступна. Перевір, чи напарник ще в кімнаті."
       : undo ? "На цій ділянці немає розкладання, яке можна скасувати"

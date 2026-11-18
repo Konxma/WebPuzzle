@@ -323,6 +323,9 @@ export async function createPuzzleRenderer(
   const sprites=new Map<number,Sprite>();
   const spriteTiles = new WeakMap<object, Tile>();
   let pointer: { clientX: number; clientY: number } | undefined;
+  const touches = new Map<number, { x: number; y: number }>();
+  let pinching = false;
+  let pinch: { distance: number; scale: number; anchor: { x: number; y: number } } | undefined;
   let comparison: ((tile: Tile | undefined) => void) | undefined;
   let comparedTile: Tile | undefined;
   const containers=new Map<string,Container>();
@@ -389,7 +392,7 @@ export async function createPuzzleRenderer(
       return px>=bounds.x&&py>=bounds.y&&px<=bounds.x+bounds.width&&py<=bounds.y+bounds.height&&hitCtx.isPointInPath(paths.get(tile.id)!,px,py);
     }};
     sprite.on("pointerdown",(event:FederatedPointerEvent)=>{
-      if (event.button !== 0 || !event.isPrimary || drag || pan || !vm.getSnapshot().connected) return;
+      if (pinching || event.button !== 0 || !event.isPrimary || drag || pan || !vm.getSnapshot().connected) return;
       if (finishPointing) {
         event.stopPropagation();
         pointAt(event.global, tile.id);
@@ -398,7 +401,7 @@ export async function createPuzzleRenderer(
       const groupId=pieceGroups.get(tile.id),group=groupId?vm.board!.groups.get(groupId):undefined;
       if(!group||group.placed||(group.owner!==null&&group.owner!==selfId))return;
       event.stopPropagation();
-      const pointerId = controls.clickToCarry ? null : event.pointerId;
+      const pointerId = controls.clickToCarry && event.pointerType === "mouse" ? null : event.pointerId;
       if (pointerId !== null) capture(event);
       const position=camera.toLocal(event.global);
       drag={id:group.id,offsetX:position.x-group.dx,offsetY:position.y-group.dy,startX:group.dx,startY:group.dy,
@@ -497,13 +500,20 @@ export async function createPuzzleRenderer(
     comparison(tile);
   }
   function onMove(event: PointerEvent) {
+    if (touches.has(event.pointerId)) {
+      touches.set(event.pointerId, point(event));
+      if (pinching) {
+        updatePinch();
+        return;
+      }
+    }
     if (!event.isPrimary) return;
     pointer = { clientX: event.clientX, clientY: event.clientY };
     if (comparison) frames.request();
     if (drag ? drag.pointerId !== null && drag.pointerId !== event.pointerId : pan?.pointerId !== event.pointerId) return;
     if (drag) {
       // A pointer released outside the window may re-enter without a pointerup event.
-      if (drag.pointerId !== null && !(event.buttons & 1)) {
+      if (drag.pointerId !== null && event.pointerType === "mouse" && !(event.buttons & 1)) {
         finishDrag(undefined, true);
         return;
       }
@@ -531,13 +541,19 @@ export async function createPuzzleRenderer(
     synchronize({ kind: "visibility" });
   }
   function onUp(event: PointerEvent) {
+    if (touches.delete(event.pointerId) && pinching) {
+      pinch = undefined;
+      if (!touches.size) pinching = false;
+      return;
+    }
     const released = event.type === "pointerup";
-    if (drag?.pointerId === event.pointerId && (!released || event.button === 0)) {
+    const endsGesture = !released || event.pointerType === "touch" || event.button === 0;
+    if (drag?.pointerId === event.pointerId && endsGesture) {
       if (released) pendingMove = point(event);
       // The actual element under the pointer can be a tray even when the canvas has capture.
       finishDrag(released ? dropTray(event.clientX, event.clientY) : undefined, !released);
     }
-    if (pan?.pointerId === event.pointerId && (!released || event.button === 0)) {
+    if (pan?.pointerId === event.pointerId && endsGesture) {
       if (released) pendingMove = point(event);
       applyMove();
       pan = null;
@@ -547,6 +563,9 @@ export async function createPuzzleRenderer(
     }
   }
   function onBlur() {
+    touches.clear();
+    pinching = false;
+    pinch = undefined;
     pointer = undefined;
     if (comparison) frames.request();
     endPointing();
@@ -580,7 +599,7 @@ export async function createPuzzleRenderer(
   }
   app.stage.eventMode="static";app.stage.hitArea=new Rectangle(0,0,app.screen.width,app.screen.height);
   app.stage.on("pointerdown", (event: FederatedPointerEvent) => {
-    if (event.button !== 0 || !event.isPrimary || pan) return;
+    if (pinching || event.button !== 0 || !event.isPrimary || pan) return;
     if (finishPointing) {
       pointAt(event.global, null);
       return;
@@ -633,8 +652,42 @@ export async function createPuzzleRenderer(
     positionCamera(x - before.x * scale, y - before.y * scale);
     if(drag)showSelection();details?.request();groupSurfaces?.request();frames.request();
   };
+  function touchSpan() {
+    const [first, second] = touches.values();
+    if (!first || !second) return;
+    return {
+      x: (first.x + second.x) / 2,
+      y: (first.y + second.y) / 2,
+      distance: Math.max(1, Math.hypot(second.x - first.x, second.y - first.y)),
+    };
+  }
+  function startTouch(event: PointerEvent) {
+    if (event.pointerType !== "touch") return;
+    touches.set(event.pointerId, point(event));
+    if (touches.size !== 2) return;
+    pinching = true;
+    endPointing();
+    pendingMove = null;
+    if (drag) finishDrag(undefined, true);
+    pan = null;
+    camera.interactiveChildren = true;
+    app.canvas.style.cursor = "default";
+    const span = touchSpan()!;
+    pinch = { distance: span.distance, scale: camera.scale.x, anchor: camera.toLocal(span) };
+  }
+  function updatePinch() {
+    const span = touchSpan();
+    if (!span || !pinch || controls.cameraLocked) return;
+    const scale = Math.max(fitScale(), Math.min(6, pinch.scale * span.distance / pinch.distance));
+    camera.scale.set(scale);
+    positionCamera(span.x - pinch.anchor.x * scale, span.y - pinch.anchor.y * scale);
+    details?.request();
+    groupSurfaces?.request();
+    frames.request();
+  }
   function onWheel(event:WheelEvent){event.preventDefault();const p=point(event);zoomAt(Math.exp(-event.deltaY*.0015),p.x,p.y);}
   function preventContext(event:Event){event.preventDefault();}
+  app.canvas.addEventListener("pointerdown", startTouch, true);
   window.addEventListener("keydown", onKeyDown);
   // The toolbar is layered over the canvas, so a release can target it instead.
   window.addEventListener("pointermove", onMove, true);
@@ -739,6 +792,6 @@ export async function createPuzzleRenderer(
       centerOnTile(markerTile(next), next.position);
     },
     refreshPalette,
-    dispose(){disposed=true;clearTimeout(hintTimer);reducedMotion.removeEventListener("change", redrawHint);hintCanvas.remove();hintDirection.remove();saveView();window.removeEventListener("pagehide",saveView);clearInterval(carryHeartbeat);window.removeEventListener("keydown",onKeyDown);frames.dispose();groupSurfaces?.dispose();details?.dispose();unsubscribe();observer.disconnect();unwatchDensity();window.removeEventListener("pointermove",onMove,true);window.removeEventListener("pointerup",onUp,true);window.removeEventListener("pointercancel",onUp,true);window.removeEventListener("blur",onBlur);app.canvas.removeEventListener("wheel",onWheel);app.canvas.removeEventListener("contextmenu",preventContext);for(const sprite of sprites.values())sprite.texture.destroy();app.destroy(true,{children:true});atlasTexture.destroy(true);},
+    dispose(){disposed=true;clearTimeout(hintTimer);reducedMotion.removeEventListener("change", redrawHint);hintCanvas.remove();hintDirection.remove();saveView();window.removeEventListener("pagehide",saveView);clearInterval(carryHeartbeat);window.removeEventListener("keydown",onKeyDown);frames.dispose();groupSurfaces?.dispose();details?.dispose();unsubscribe();observer.disconnect();unwatchDensity();window.removeEventListener("pointermove",onMove,true);window.removeEventListener("pointerup",onUp,true);window.removeEventListener("pointercancel",onUp,true);window.removeEventListener("blur",onBlur);app.canvas.removeEventListener("pointerdown",startTouch,true);app.canvas.removeEventListener("wheel",onWheel);app.canvas.removeEventListener("contextmenu",preventContext);for(const sprite of sprites.values())sprite.texture.destroy();app.destroy(true,{children:true});atlasTexture.destroy(true);},
   };
 }

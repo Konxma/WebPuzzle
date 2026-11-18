@@ -18,8 +18,8 @@ async function until(fn,message){
   while(Date.now()<end){if(fn())return;await pause(10);}
   throw new Error(message);
 }
-test("two clients synchronize, third is rejected, ownership and reconnection work",async()=>{
-  const clients=[new Client(endpoint),new Client(endpoint),new Client(endpoint)];
+test("three clients synchronize, fourth is rejected, ownership and reconnection work",async()=>{
+  const clients=Array.from({length:4},()=>new Client(endpoint));
   const rooms=[];
   try{
     const a=await clients[0].create("puzzle",{pieceCount:7});rooms.push(a);const sa=listen(a);a.send("sync");
@@ -28,7 +28,18 @@ test("two clients synchronize, third is rejected, ownership and reconnection wor
     await until(()=>sb.snapshot,"guest snapshot");
     assert.equal(sb.snapshot.definition.pieceCount,7);
     assert.deepEqual(sb.snapshot.groups,sa.snapshot.groups);
-    await assert.rejects(()=>clients[2].joinById(a.roomId));
+    const c = await clients[2].joinById(a.roomId); rooms.push(c);
+    const sc = listen(c); c.send("sync");
+    await until(() => sc.snapshot, "third player snapshot");
+    assert.deepEqual(sc.snapshot.players.map(player => player.name), ["Гравець 1", "Гравець 2", "Гравець 3"]);
+    assert.deepEqual(sc.snapshot.groups, sa.snapshot.groups);
+    await assert.rejects(() => clients[3].joinById(a.roomId));
+    let markerB, markerC;
+    b.onMessage("board-marker", marker => { markerB = marker; });
+    c.onMessage("board-marker", marker => { markerC = marker; });
+    a.send("command", { type: "point-at", position: { x: 200, y: 150 }, tray: null, tileId: null });
+    await until(() => markerB && markerC, "marker reached both guests");
+    assert.deepEqual(markerB, markerC);
     a.send("command",{type:"grab-group",groupId:"0"});
     await until(()=>sb.deltas.some(d=>d.groups.some(g=>g.id==="0"&&g.owner===a.sessionId)),"grab propagated");
     const length=sa.deltas.length;
@@ -37,6 +48,8 @@ test("two clients synchronize, third is rejected, ownership and reconnection wor
     assert.equal(sa.deltas.length,length);
     a.send("command",{type:"move-group",groupId:"0",position:{x:500,y:400}});
     await until(()=>sb.deltas.some(d=>d.groups.some(g=>g.id==="0"&&g.dx===500)),"move propagated");
+    await until(()=>sc.deltas.some(d=>d.groups.some(g=>g.id==="0"&&g.dx===500)),"move reached third player");
+    assert.equal(sa.deltas.length, length, "sender does not receive its own motion");
     a.send("command",{type:"release-group",groupId:"0",position:{x:0,y:0}});
     await until(()=>sb.deltas.some(d=>d.groups.some(g=>g.id==="0"&&g.placed)),"placement propagated");
     const token=b.reconnectionToken;

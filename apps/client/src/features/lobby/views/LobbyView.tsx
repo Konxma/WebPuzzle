@@ -86,9 +86,9 @@ export function LobbyView({ viewModel, ...theme }: { viewModel: LobbyViewModel }
     <main id="main" className="main">
       <section className="hero" aria-labelledby="hero-title">
         <div className="hero-copy">
-          <p className="eyebrow">Пазли для двох</p>
+          <p className="eyebrow">Пазли для 1–3 гравців</p>
           <h1 id="hero-title">Одна картина.<br/>Збирайте<br className="desktop-break"/> разом</h1>
-          <p className="description">Влаштуйте собі тихий вечір за пазлом.<br className="desktop-break"/> Кожен за своїм комп’ютером — разом за одним столом</p>
+          <p className="description">Влаштуйте собі тихий вечір за пазлом.<br className="desktop-break"/> Грайте з друзями за одним столом, кожен зі свого пристрою</p>
           <fieldset className="puzzle-setup" disabled={state.busy}>
             <legend>Налаштування пазла</legend>
             <div className="setup-options" role="group" aria-label="Зображення">
@@ -107,7 +107,7 @@ export function LobbyView({ viewModel, ...theme }: { viewModel: LobbyViewModel }
                 {state.photo ? "Змінити файл" : "Вибрати файл"}
               </label>
               <span className="photo-name" title={state.photo?.name}>
-                {state.photo ? previewName : "Або вставте фото через Ctrl+V"}
+                {state.photo ? previewName : "JPG, PNG або WebP"}
               </span>
             </div>}
             <div className="piece-setting">
@@ -156,7 +156,7 @@ export function LobbyView({ viewModel, ...theme }: { viewModel: LobbyViewModel }
             </span>
           </div>
           <form className="join-room" onSubmit={event=>{event.preventDefault();viewModel.joinRoom();}}>
-<label htmlFor="room-code">Є запрошення?</label><div><input id="room-code" value={state.roomCode} placeholder="Посилання або код кімнати" onChange={event=>viewModel.setRoomCode(event.target.value)} aria-invalid={!!state.roomCodeError} aria-describedby={state.roomCodeError?"room-error":undefined}/><button className="button secondary-button" type="submit" disabled={state.busy}>Приєднатися</button></div>
+<label htmlFor="room-code">Є запрошення?</label><div><input id="room-code" autoCapitalize="none" autoCorrect="off" spellCheck={false} value={state.roomCode} placeholder="Посилання або код кімнати" onChange={event=>viewModel.setRoomCode(event.target.value)} aria-invalid={!!state.roomCodeError} aria-describedby={state.roomCodeError?"room-error":undefined}/><button className="button secondary-button" type="submit" disabled={state.busy}>Приєднатися</button></div>
 {state.roomCodeError&&<p className="field-error" id="room-error" role="alert">{state.roomCodeError}</p>}</form>
           {state.savedPuzzles.length > 0 && <section className="saved-puzzles" aria-labelledby="saved-title">
             <h2 id="saved-title">Збережені пазли</h2>
@@ -238,7 +238,7 @@ export function LobbyView({ viewModel, ...theme }: { viewModel: LobbyViewModel }
     </dialog>
     <footer className="footer">
       <span>Від першої деталі до останньої</span>
-      <span className="desktop-note"><Icon name="monitor"/>Для браузера на комп’ютері</span>
+      <span className="desktop-note"><Icon name="monitor"/>Працює в браузері</span>
     </footer>
   </div>;
 }
