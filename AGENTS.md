@@ -1,7 +1,7 @@
 # Project conventions
 
 - Read `docs/ARCHITECTURE.md` first for the current stack, entry points and verification commands.
-- Multiplayer is scoped to three players in one local network. `Start.cmd` runs the LAN launcher directly.
+- Multiplayer is scoped to eight players in one local network. `Start.cmd` runs the LAN launcher directly.
 
 - Use TypeScript. Keep the UI and README in Ukrainian.
 - Client features use MVVM: views -> viewmodels -> model interfaces/domain.

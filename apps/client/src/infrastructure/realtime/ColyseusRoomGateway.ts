@@ -1,5 +1,5 @@
 import { Client, CloseCode, type Room } from "@colyseus/sdk";
-import { ROOM_KICK_REASON, type RoomCommand, type ServerEvent, type RoomSnapshot, type GameDelta, type PlayerInfo, type BoardMarker, type BoardActionResult } from "@web-pazle/shared";
+import { ROOM_KICK_REASON, type RoomCommand, type ServerEvent, type RoomSnapshot, type GameDelta, type PlayerInfo, type BoardMarker, type BoardActionResult, type GroupMotion } from "@web-pazle/shared";
 import type { RoomGateway, RoomOptions } from "../../features/puzzle/models/RoomGateway";
 import { InviteAddress } from "../http/InviteAddress";
 const tokenKey = (roomId: string) => "puzzle:" + roomId;
@@ -86,7 +86,12 @@ export class ColyseusRoomGateway implements RoomGateway {
     rememberSeat(room);
     room.onMessage("snapshot",(snapshot:RoomSnapshot)=>listener({type:"snapshot",snapshot}));
     room.onMessage("delta",(delta:GameDelta)=>listener({type:"delta",delta}));
-    room.onMessage("motion",(group:{id:string;dx:number;dy:number;owner:string|null})=>listener({type:"motion",group}));
+    room.onMessage("motion", (group: GroupMotion) => listener({ type: "motion", group }));
+    room.onMessage("motion-batch", (groups: GroupMotion[]) => {
+      for (const group of groups) {
+        if (group.owner !== room.sessionId) listener({ type: "motion", group });
+      }
+    });
     room.onMessage("board-marker", (marker: BoardMarker) => listener({ type: "board-marker", marker }));
     room.onMessage("board-action-result", (result: BoardActionResult) => listener({ type: "board-action-result", result }));
     room.onMessage("players",(players:PlayerInfo[])=>listener({type:"players",players}));

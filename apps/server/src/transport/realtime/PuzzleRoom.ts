@@ -1,5 +1,5 @@
 import { CloseCode, Room, type Client } from "@colyseus/core";
-import { PuzzleEngine, DEFAULT_IMAGE_ID, DEFAULT_PUZZLE_SHAPE, isPuzzleShape, MAX_ROOM_PLAYERS, ROOM_KICK_REASON, assertPieceCount, isPuzzleFeatures, isPuzzleFileId, isPuzzleTray, TABLE_BOUNDS, type BoardActionResult, type PlayerInfo, type GameDelta } from "@web-pazle/shared";
+import { PuzzleEngine, DEFAULT_IMAGE_ID, DEFAULT_PUZZLE_SHAPE, isPuzzleShape, MAX_ROOM_PLAYERS, ROOM_KICK_REASON, assertPieceCount, isPuzzleFeatures, isPuzzleFileId, isPuzzleTray, TABLE_BOUNDS, type BoardActionResult, type PlayerInfo, type GameDelta, type GroupMotion } from "@web-pazle/shared";
 import { randomInt, randomUUID } from "node:crypto";
 import { puzzleLibrary } from "../../infrastructure/PuzzleLibrary.js";
 export class PuzzleRoom extends Room {
@@ -13,6 +13,7 @@ export class PuzzleRoom extends Room {
   private lastActivity=new Map<string,number>();
   private lastMarker = new Map<string, number>();
   private lastArrange = 0;
+  private pendingMotion = new Map<string, GroupMotion>();
   onCreate(options:unknown){
     const input = (options ?? {}) as Record<string, unknown>;
     if (input.saveKey !== undefined) {
@@ -40,6 +41,7 @@ export class PuzzleRoom extends Room {
     void this.setPrivate(true);
     this.onMessage("sync",(client)=>this.sendSnapshot(client));
     this.onMessage("command",(client,payload:unknown)=>this.command(client,payload));
+    this.clock.setInterval(() => this.flushMotion(), 50);
     this.clock.setInterval(()=>{
       for(const [id,time]of this.lastActivity)if(Date.now()-time>15000){this.commit(this.engine.releaseOwner(id));this.lastActivity.delete(id);}
     },1000);
@@ -59,7 +61,24 @@ export class PuzzleRoom extends Room {
     const saveKey = client.sessionId === this.saveOwnerId ? this.saveKey : undefined;
     client.send("snapshot",{...this.engine.snapshot(),roomId:this.roomId,players:[...this.players.values()],selfId:client.sessionId,...(saveKey ? { saveKey } : {})});
   }
-  private publish(delta:GameDelta|null){if(delta&&(delta.groups.length||delta.removed.length||delta.trays||delta.trayNames||delta.features))this.broadcast("delta",delta);}
+  private publish(delta: GameDelta | null) {
+    if (!delta || !(delta.groups.length || delta.removed.length || delta.trays || delta.trayNames || delta.features)) return;
+    // A structural delta supersedes any queued coordinates for the affected groups.
+    for (const group of delta.groups) this.pendingMotion.delete(group.id);
+    for (const id of delta.removed) this.pendingMotion.delete(id);
+    this.broadcast("delta", delta);
+  }
+  private flushMotion() {
+    if (this.pendingMotion.size === 0) return;
+    const motions = [...this.pendingMotion.values()];
+    this.pendingMotion.clear();
+    if (motions.length === 1) {
+      const motion = motions[0]!;
+      this.broadcast("motion", motion, { except: this.clients.getById(motion.owner) });
+    } else {
+      this.broadcast("motion-batch", motions);
+    }
+  }
   private commit(delta: GameDelta | null) {
     if (!delta || (!delta.groups.length && !delta.trays && !delta.trayNames && !delta.features)) return;
     this.publish(delta);
@@ -117,7 +136,7 @@ export class PuzzleRoom extends Room {
       const dx = previous?.dx, dy = previous?.dy;
       const group = this.engine.move(id, client.sessionId, x, y)?.groups[0];
       if (group && (group.dx !== dx || group.dy !== dy)) {
-        this.broadcast("motion", { id: group.id, dx: group.dx, dy: group.dy, owner: group.owner }, { except: client });
+        this.pendingMotion.set(group.id, { id: group.id, dx: group.dx, dy: group.dy, owner: client.sessionId });
       }
     }
     else if(payload.type==="release-group")this.commit(this.engine.release(id,client.sessionId,x,y));

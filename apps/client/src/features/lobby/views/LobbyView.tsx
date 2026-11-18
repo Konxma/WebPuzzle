@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { DEFAULT_IMAGE_ID, DEMO_PIECE_COUNT, PUZZLE_SHAPES, puzzleImageUrl, type PuzzleShape } from "@web-pazle/shared";
+import { DEFAULT_IMAGE_ID, DEMO_PIECE_COUNT, MAX_ROOM_PLAYERS, PUZZLE_SHAPES, puzzleImageUrl, type PuzzleShape } from "@web-pazle/shared";
 import { Icon } from "../../../shared/ui/Icon";
 import { ThemeToggle, type ThemeControls } from "../../../shared/ui/ThemeToggle";
 import { PuzzlePreview } from "./PuzzlePreview";
@@ -86,7 +86,7 @@ export function LobbyView({ viewModel, ...theme }: { viewModel: LobbyViewModel }
     <main id="main" className="main">
       <section className="hero" aria-labelledby="hero-title">
         <div className="hero-copy">
-          <p className="eyebrow">Пазли для 1–3 гравців</p>
+          <p className="eyebrow">Пазли для 1–{MAX_ROOM_PLAYERS} гравців</p>
           <h1 id="hero-title">Одна картина.<br/>Збирайте<br className="desktop-break"/> разом</h1>
           <p className="description">Влаштуйте собі тихий вечір за пазлом.<br className="desktop-break"/> Грайте з друзями за одним столом, кожен зі свого пристрою</p>
           <fieldset className="puzzle-setup" disabled={state.busy}>

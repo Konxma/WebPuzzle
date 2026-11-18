@@ -6,7 +6,9 @@ $ErrorActionPreference = 'Stop'
 $project = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $output = (New-Item -ItemType Directory -Force -Path $OutputDirectory).FullName
 $archive = Join-Path $output 'WebPuzzle-Windows-x64.zip'
+$exe = Join-Path $output 'WebPuzzle.exe'
 if (Test-Path -LiteralPath $archive) { throw "An archive already exists at $archive." }
+if (Test-Path -LiteralPath $exe) { throw "A launcher already exists at $exe." }
 
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('webpuzzle-package-' + [guid]::NewGuid())
 $stage = Join-Path $temp 'WebPuzzle'
@@ -73,9 +75,15 @@ try {
     }
   }
 
+  $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+  $banner = Join-Path $PSScriptRoot 'portable/quiet-bay-banner.png'
+  & $compiler /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/resource:$banner,WebPuzzle.Banner" "/out:$stage/WebPuzzle.exe" (Join-Path $PSScriptRoot 'portable/WebPuzzleLauncher.cs')
+  if ($LASTEXITCODE -ne 0) { throw 'Windows launcher build failed.' }
+
   Add-Type -AssemblyName System.IO.Compression.FileSystem
   [IO.Compression.ZipFile]::CreateFromDirectory($stage, $archive, [IO.Compression.CompressionLevel]::Optimal, $true, [Text.Encoding]::UTF8)
-  Get-Item -LiteralPath $archive | Select-Object FullName,Length
+  & (Join-Path $PSScriptRoot 'build-standalone.ps1') -ArchivePath $archive -OutputPath $exe | Out-Null
+  Get-Item -LiteralPath $archive,$exe | Select-Object FullName,Length
 } finally {
   Pop-Location
   $resolvedTemp = (Resolve-Path -LiteralPath $temp).Path

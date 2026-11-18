@@ -1,0 +1,24 @@
+param(
+  [Parameter(Mandatory)] [string] $ArchivePath,
+  [Parameter(Mandatory)] [string] $OutputPath
+)
+
+$ErrorActionPreference = 'Stop'
+$archive = Get-Item -LiteralPath $ArchivePath
+$output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
+if (Test-Path -LiteralPath $output) { throw "A launcher already exists at $output." }
+
+$hash = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash.Substring(0, 24).ToLowerInvariant()
+$compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+$launcher = Join-Path $PSScriptRoot 'portable/WebPuzzleLauncher.cs'
+$embedded = Join-Path $PSScriptRoot 'portable/EmbeddedGame.cs'
+$banner = Join-Path $PSScriptRoot 'portable/quiet-bay-banner.png'
+$arguments = @(
+  '/nologo', '/codepage:65001', '/target:winexe', '/platform:x64', '/optimize+', '/define:EMBEDDED_PACKAGE',
+  '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll',
+  '/reference:System.IO.Compression.dll', '/reference:System.IO.Compression.FileSystem.dll',
+  "/resource:$banner,WebPuzzle.Banner", "/resource:$($archive.FullName),WebPuzzle.Package.$hash", "/out:$output", $launcher, $embedded
+)
+& $compiler @arguments
+if ($LASTEXITCODE -ne 0) { throw 'Standalone Windows launcher build failed.' }
+Get-Item -LiteralPath $output

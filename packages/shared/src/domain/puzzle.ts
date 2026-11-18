@@ -1,4 +1,4 @@
-export const MAX_ROOM_PLAYERS = 3;
+export const MAX_ROOM_PLAYERS = 8;
 export const MIN_PIECE_COUNT = 1;
 export const MAX_PIECE_COUNT = 3000;
 export const DEMO_PIECE_COUNT = 24;

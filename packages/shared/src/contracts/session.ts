@@ -12,10 +12,11 @@ export interface BoardActionResult {
 export const ROOM_KICK_REASON = "kicked-by-host";
 export interface PlayerInfo { id:string; name:string; connected:boolean; isHost:boolean }
 export interface RoomSnapshot extends GameSnapshot { roomId:string; players:PlayerInfo[]; selfId:string; saveKey?:string }
+export interface GroupMotion { id: string; dx: number; dy: number; owner: string }
 export type ServerEvent =
   | { type:"snapshot"; snapshot:RoomSnapshot }
   | { type:"delta"; delta:GameDelta }
-  | { type:"motion"; group:{id:string;dx:number;dy:number;owner:string|null} }
+  | { type:"motion"; group:GroupMotion }
   | { type:"players"; players:PlayerInfo[] }
   | { type:"board-marker"; marker: BoardMarker }
   | { type:"board-action-result"; result: BoardActionResult }

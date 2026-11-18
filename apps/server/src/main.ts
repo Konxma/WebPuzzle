@@ -41,4 +41,5 @@ const server=new Server({
 });
 server.define("puzzle",PuzzleRoom);
 await server.listen(port, clientDir ? "0.0.0.0" : "127.0.0.1");
+export const stopServer = () => server.gracefullyShutdown();
 console.log(`WebPuzzle server: http://127.0.0.1:${port}`);
