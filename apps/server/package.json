@@ -10,16 +10,12 @@
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@web-pazle/shared": "0.1.0",
-    "@colyseus/schema": "latest",
-    "drizzle-orm": "latest",
-    "pg": "^8.0.0",
     "@colyseus/core": "^0.18.0",
-    "@colyseus/ws-transport": "^0.18.0"
+    "@colyseus/schema": "latest",
+    "@colyseus/ws-transport": "^0.18.0",
+    "@web-pazle/shared": "0.1.0"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "@types/pg": "^8.0.0",
-    "drizzle-kit": "latest"
+    "@types/node": "^22.0.0"
   }
 }
