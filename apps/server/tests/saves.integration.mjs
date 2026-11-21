@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
@@ -29,7 +29,7 @@ async function snapshot(room) {
   return received;
 }
 
-test("a guest shares a photo and tray, then the host restores the board after a server restart", { timeout: 25000 }, async t => {
+test("photo and progress survive restart and old tray pieces return to the table", { timeout: 25000 }, async t => {
   const tempRoot = await realpath(tmpdir());
   const data = await mkdtemp(join(tempRoot, "webpazle-save-test-"));
   const probe = createServer().listen(0, "127.0.0.1");
@@ -72,10 +72,9 @@ test("a guest shares a photo and tray, then the host restores the board after a 
   const { imageId } = await response.json();
 
   await assert.rejects(() => client.create("puzzle", { pieceCount: 1000, imageId, shape: "invalid" }));
-  const host = await client.create("puzzle", { pieceCount: 1000, imageId, shape: "classic-wide", features: { trays: true, edgeFilter: true } });
+  const host = await client.create("puzzle", { pieceCount: 1000, imageId, shape: "classic-wide" });
   const initial = await snapshot(host);
   assert.ok(initial.saveKey);
-  assert.deepEqual(initial.trays, []);
   const guest = await client.joinById(host.roomId);
   const joined = await snapshot(guest);
   assert.equal(joined.saveKey, undefined);
@@ -88,33 +87,24 @@ test("a guest shares a photo and tray, then the host restores the board after a 
   const deleteSave = () => fetch(saveUrl, { method: "DELETE" });
   assert.equal((await deleteSave()).status, 409);
 
-  const hostTray = nextMessage(host, "delta", value => value.trays?.length === 1);
-  const guestTray = nextMessage(guest, "delta", value => value.trays?.length === 1);
-  guest.send("command", { type: "create-tray" });
-  assert.deepEqual((await hostTray).trays, ["tray-1"]);
-  assert.deepEqual((await guestTray).trays, ["tray-1"]);
-  const renamed = nextMessage(host, "delta", value => value.trayNames?.["tray-1"] === "Небо");
-  guest.send("command", { type: "rename-tray", tray: "tray-1", name: "  Небо  " });
-  await renamed;
+  assert.equal(initial.fieldSize, 1);
+  const resized = nextMessage(guest, "delta", delta => delta.fieldSize === 2);
+  host.send("command", { type: "resize-field", size: 2 });
+  await resized;
+  guest.send("command", { type: "resize-field", size: 1 });
+  assert.equal((await snapshot(guest)).fieldSize, 2);
 
   let hostSawMarker = false;
   const stopListening = host.onMessage("board-marker", () => { hostSawMarker = true; });
   const marker = nextMessage(guest, "board-marker");
   const markerResult = nextMessage(host, "board-action-result");
-  host.send("command", { type: "point-at", tray: "tray-1", position: { x: 240, y: 150 }, requestId: 1 });
-  assert.deepEqual(await marker, { tray: "tray-1", position: { x: 240, y: 150 } });
+  host.send("command", { type: "point-at", position: { x: 240, y: 150 }, requestId: 1 });
+  assert.deepEqual(await marker, { position: { x: 240, y: 150 } });
   assert.deepEqual(await markerResult, { requestId: 1, outcome: "done" });
 
-  const emptyTray = nextMessage(host, "board-action-result");
-  host.send("command", { type: "arrange-pieces", tray: "tray-1", requestId: 2 });
-  assert.deepEqual(await emptyTray, { requestId: 2, outcome: "unavailable" });
   assert.equal(hostSawMarker, false);
   stopListening();
 
-  host.send("command", { type: "grab-group", groupId: "0" });
-  const stashed = nextMessage(guest, "delta", value => value.groups.some(group => group.tray === "tray-1"));
-  host.send("command", { type: "stash-group", groupId: "0", tray: "tray-1", position: { x: 240, y: 150 } });
-  assert.equal((await stashed).groups[0].owner, null);
   guest.send("command", { type: "grab-group", groupId: "1" });
   const placed = nextMessage(host, "delta", value => value.groups.some(group => group.placed));
   guest.send("command", { type: "release-group", groupId: "1", position: { x: 0, y: 0 } });
@@ -122,6 +112,18 @@ test("a guest shares a photo and tray, then the host restores the board after a 
   await guest.leave();
   await host.leave();
   await stop();
+  const savePath = join(data, "saves", initial.saveKey + ".json");
+  const legacy = JSON.parse(await readFile(savePath, "utf8"));
+  legacy.snapshot.trays = ["tray-1"];
+  legacy.snapshot.trayNames = { "tray-1": "Небо" };
+  legacy.snapshot.features = { trays: true, edgeFilter: true };
+  Object.assign(legacy.snapshot.groups.find(group => group.id === "0"),
+    { dx: 240, dy: 150, owner: "old-player", tray: "tray-1" });
+  legacy.snapshot.arrangeHistory = [
+    { tray: "tray-1", positions: [{ id: "0", dx: 300, dy: 350 }] },
+    { tray: null, positions: [{ id: "2", dx: 360, dy: 400 }] },
+  ];
+  await writeFile(savePath, JSON.stringify(legacy));
   await start();
 
   const details = await (await fetch(saveUrl)).json();
@@ -135,40 +137,21 @@ test("a guest shares a photo and tray, then the host restores the board after a 
   const restored = await client.create("puzzle", { saveKey: initial.saveKey });
   try {
     const state = await snapshot(restored);
+    assert.equal(state.fieldSize, 2);
     assert.deepEqual(state.definition, initial.definition);
-    assert.deepEqual(state.trays, ["tray-1"]);
-    assert.deepEqual(state.trayNames, { "tray-1": "Небо" });
-    assert.deepEqual(state.features, { trays: true, edgeFilter: true });
+    assert.ok(!("trays" in state) && !("trayNames" in state) && !("features" in state));
     assert.equal(state.groups.flatMap(group => group.pieces).length, 1000);
-    assert.deepEqual(state.groups.find(group => group.pieces.includes(0)), { id: "0", pieces: [0], dx: 240, dy: 150, owner: null, placed: false, tray: "tray-1" });
+    assert.deepEqual(state.groups.find(group => group.pieces.includes(0)), { id: "0", pieces: [0], dx: 240, dy: 150, owner: null, placed: false });
     assert.ok(state.groups.some(group => group.pieces.includes(1) && group.placed));
     assert.ok(state.groups.every(group => group.owner === null));
-    const guest = await client.joinById(restored.roomId);
-    await snapshot(guest);
-    try {
-      const grabbed = nextMessage(restored, "delta", value => value.groups.some(group => group.id === "0" && group.owner));
-      guest.send("command", { type: "grab-group", groupId: "0" });
-      await grabbed;
-      const hostUpdate = nextMessage(restored, "delta", value => value.trays?.length === 0);
-      const guestUpdate = nextMessage(guest, "delta", value => value.trays?.length === 0);
-      restored.send("command", { type: "delete-tray", tray: "tray-1" });
-      const expected = { groups: [{ id: "0", pieces: [0], dx: 240, dy: 150, owner: null, placed: false }], removed: [], trays: [], trayNames: {} };
-      assert.deepEqual(await hostUpdate, expected);
-      assert.deepEqual(await guestUpdate, expected);
-    } finally { await guest.leave(); }
+    const undo = nextMessage(restored, "delta");
+    const undoResult = nextMessage(restored, "board-action-result");
+    restored.send("command", { type: "undo-arrange", requestId: 2 });
+    assert.deepEqual((await undo).groups.map(({ id, dx, dy }) => ({ id, dx, dy })), [{ id: "2", dx: 360, dy: 400 }]);
+    assert.deepEqual(await undoResult, { requestId: 2, outcome: "done" });
+    const cleaned = JSON.parse(await readFile(savePath, "utf8")).snapshot;
+    assert.ok(!("trays" in cleaned) && cleaned.groups.every(group => !("tray" in group)));
   } finally { await restored.leave(); }
-  await stop();
-  await start();
-
-  const afterDelete = await client.create("puzzle", { saveKey: initial.saveKey });
-  try {
-    const state = await snapshot(afterDelete);
-    assert.deepEqual(state.trays, []);
-    assert.equal(state.groups.find(group => group.id === "0").tray, undefined);
-    assert.equal(state.groups.flatMap(group => group.pieces).length, 1000);
-  } finally { await afterDelete.leave(); }
-  await stop();
-  await start();
 
   assert.equal((await deleteSave()).status, 204);
   assert.equal((await deleteSave()).status, 204);

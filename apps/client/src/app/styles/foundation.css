@@ -1,0 +1,218 @@
+/* Design workflow: Unslop by Damir Sokolovsky (@heydamir), CC BY 4.0.
+   https://github.com/heydamir/unslop. Original WebPuzzle illustration. */
+
+:root {
+  font-family: "Segoe UI", sans-serif;
+  color: var(--text);
+  background: var(--page);
+  font-synthesis: none;
+  --text: #243c34;
+  --secondary: #58615a;
+  --muted: #70736b;
+  --line: #e1e3db;
+  --accent: #294e3e;
+  --accent-text: #fff;
+  --accent-hover: #1d3c2e;
+  --page: #f8f8f4;
+  --surface: #fafaf7;
+  --input: #fff;
+  --hover: #e7e9e1;
+  --border: #c8cec3;
+  --danger: #a13d32;
+  --online: #457557;
+  --board-background: #efefe8;
+  --board-frame: #e2e1d8;
+  --board-line: #bfc6b8;
+  --hint-color: #275b49;
+  --hint-contrast: #f5fbed;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  --status-idle: #85867b;
+  --shadow-soft: 0 4px 16px #00000008;
+  --shadow-menu: 0 4px 16px #00000020;
+  --dialog-backdrop: rgb(12 16 13 / 58%);
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-48: 48px;
+  --space-64: 64px;
+  --space-80: 80px;
+  --radius-detail: 4px;
+  --radius-control: 8px;
+  --radius-panel: 12px;
+  --radius-dialog: 16px;
+  --font-meta: .8125rem;
+  --font-control: .875rem;
+  --line-meta: 1.4;
+  --control-height: 36px;
+  --touch-target: 44px;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --text: #efece5;
+  --secondary: #c4c1b8;
+  --muted: #aaa89e;
+  --line: #33332e;
+  --accent: #bbd5bd;
+  --accent-text: #18251d;
+  --accent-hover: #d1e4d0;
+  --page: #151513;
+  --surface: #1c1c19;
+  --input: #252521;
+  --hover: #2d2d28;
+  --border: #54554b;
+  --danger: #f0a299;
+  --online: #8fb59a;
+  --board-background: #20211e;
+  --board-frame: #2c302b;
+  --board-line: #5d685c;
+  --hint-color: #bbd5bd;
+  --hint-contrast: #18251d;
+  --status-idle: #aaa89e;
+  --shadow-soft: 0 4px 16px #00000020;
+  --shadow-menu: 0 4px 16px #00000048;
+  --dialog-backdrop: rgb(0 0 0 / 64%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button, input {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+button:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.icon {
+  display: inline-block;
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  vertical-align: middle;
+}
+
+.page {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+.skip-link {
+  position: fixed;
+  top: calc(-1 * var(--space-80));
+  left: var(--space-24);
+  padding: var(--space-12) var(--space-16);
+  background: var(--input);
+  color: var(--text);
+  z-index: 10;
+}
+
+.skip-link:focus {
+  top: var(--space-12);
+}
+
+.header {
+  border-bottom: 1px solid var(--line);
+}
+
+.header-inner, .main, .footer {
+  width: min(1440px, 100%);
+  margin-inline: auto;
+  padding-inline: var(--space-48);
+}
+
+.header-inner {
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  font-size: 1.25rem;
+  font-weight: 600;
+}
+
+.brand-symbol {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.header-caption {
+  font-size: var(--font-meta);
+  color: var(--muted);
+}
+
+.main {
+  flex: 1;
+  display: grid;
+  align-items: center;
+  padding-block: var(--space-48);
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: .95fr 1.25fr;
+  align-items: center;
+  column-gap: var(--space-48);
+  row-gap: var(--space-16);
+}
+
+.lobby-access {
+  grid-column: 1;
+}
+
+.hero-copy {
+  padding-block: var(--space-8);
+}
+
+.eyebrow {
+  margin: 0 0 var(--space-24);
+  color: var(--secondary);
+  font-size: var(--font-control);
+}
+
+h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(2.5rem, 1rem + 3vw, 4rem);
+  line-height: 1.08;
+  letter-spacing: -.03em;
+  font-weight: 400;
+  margin: 0 0 var(--space-24);
+}
+
+.description {
+  color: var(--secondary);
+  font-size: 1rem;
+  line-height: 1.65;
+  max-width: 420px;
+  margin: 0;
+}

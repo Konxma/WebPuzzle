@@ -1,4 +1,4 @@
-import { PuzzleEngine, DEFAULT_IMAGE_ID } from '@web-pazle/shared';
+import { PuzzleEngine, DEFAULT_IMAGE_ID, TABLE_WIDTH, TABLE_HEIGHT } from '@web-pazle/shared';
 import { createPuzzleRenderer } from '../src/features/puzzle/rendering/PuzzleRenderer.ts';
 
 const host=document.querySelector('#board'),result=document.querySelector('#result');
@@ -20,18 +20,40 @@ document.querySelector('#run').onclick=async()=>{
       // Put at least one piece at the center of the viewport for crop assertions.
       const tile=engine.tiles[0],group=engine.groups.get('0');
       group.dx=800-tile.x-tile.width/2;group.dy=500-tile.y-tile.height/2;
-      let notify=()=>{};
+      let notify=()=>{}, viewingTray=false;
       const vm={
         board:{tiles:engine.tiles,groups:engine.groups,selfId:'test',imageId:DEFAULT_IMAGE_ID},
-        getSnapshot:()=>({connected:true}),isGroupVisible:()=>true,
+        getSnapshot:()=>({connected:true,viewingTray}),isGroupVisible:()=>true,
         onBoardChange:listener=>{notify=listener;return()=>{notify=()=>{};};},
-        grab(){},move(){},release(){},stash(){},
+        grab(){},move(){},release(){},cancelDrag(){},
       };
-      renderer=await createPuzzleRenderer(host,vm,()=>undefined);
+      const views = new Map();
+      const preferences = { read: area => views.get(area), save: (area, view) => views.set(area, view) };
+      renderer=await createPuzzleRenderer(host,vm,preferences);
       renderer.refreshPalette();
       const canvas=host.querySelector('canvas');
       await until(()=>Number(canvas.dataset.atlasResolution)>0,'Atlas did not render');
       assert(canvas.width===1000*density,'Canvas does not match display density');
+      if (count === 1) {
+        canvas.dispatchEvent(new WheelEvent("wheel", { clientX: 180, clientY: 150, deltaY: -450 }));
+        // Switch before the save timer fires to catch writing the view under the wrong area.
+        viewingTray=true; notify({kind:'visibility'});
+        const tableView = views.get('table');
+        canvas.dispatchEvent(new WheelEvent("wheel", { clientX: 750, clientY: 470, deltaY: -780 }));
+        viewingTray=false; notify({kind:'visibility'});
+        const trayView = views.get('tray');
+        assert(tableView.scale !== trayView.scale,'The areas should have different zoom levels');
+        assert(Math.abs(tableView.center.x-trayView.center.x)>1,'The areas should have different pan positions');
+        await until(() => Number(canvas.dataset.zoom) === tableView.scale,'Table zoom was lost');
+        assert(Math.abs(Number(canvas.dataset.cameraX)-(500-tableView.center.x*tableView.scale))<.001,'Table pan was lost');
+        viewingTray=true; notify({kind:'visibility'});
+        await until(() => Number(canvas.dataset.zoom) === trayView.scale,'Tray zoom was lost');
+        assert(Math.abs(Number(canvas.dataset.cameraY)-(host.clientHeight/2-trayView.center.y*trayView.scale))<.001,'Tray pan was lost');
+        viewingTray=false; notify({kind:'visibility'}); renderer.fit();
+        const fit = Math.min((host.clientWidth-64)/TABLE_WIDTH, (host.clientHeight-64)/TABLE_HEIGHT);
+        await until(() => Math.abs(Number(canvas.dataset.zoom)-fit)<.00001,'Table did not refit');
+        result.textContent+='PASS separate table and tray cameras\n';
+      }
       assert(Number(canvas.dataset.atlasResolution)>=Number(canvas.dataset.zoom)*density*2,'Distant atlas undersampled');
       assert(canvas.dataset.refinedPieces==='0','Distant pieces lost shared batching');
       // Updates every 16ms used to restart a 120ms debounce indefinitely.

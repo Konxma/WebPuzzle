@@ -1,80 +1,45 @@
 import { arrangeLoosePieces } from "./arrange.js";
-import { clampGroupToTable, combinePuzzleBounds, generateTiles, puzzleGroupBounds, SCATTER_BOUNDS, type PuzzleBounds, type Tile } from "./geometry.js";
-import { assertPieceCount, DEFAULT_PUZZLE_FEATURES, isPuzzleFeatures, isPuzzleTray, LEGACY_PUZZLE_TRAYS,
-  MAX_PUZZLE_TRAYS, normalizeTrayName, type PuzzleDefinition, type PuzzleFeatures, type PuzzleTray } from "./puzzle.js";
-export interface PuzzleGroup { id:string; pieces:number[]; dx:number; dy:number; owner:string|null; placed:boolean; tray?:PuzzleTray }
+import { slideCollection } from "./collectionPhysics.js";
+import { fieldBounds, isFieldSize, type FieldSize, clampGroupToTable, combinePuzzleBounds, generateTiles, puzzleGroupBounds, SCATTER_BOUNDS, type PuzzleBounds, type Tile } from "./geometry.js";
+import { assertPieceCount, type PuzzleDefinition } from "./puzzle.js";
+export interface PuzzleGroup { id:string; pieces:number[]; dx:number; dy:number; owner:string|null; placed:boolean; stored?: true }
 interface ArrangePosition { id: string; dx: number; dy: number }
-interface ArrangeHistory { tray: PuzzleTray | null; positions: ArrangePosition[] }
-export interface PuzzleOptions {
-  arrangeHistory?: ArrangeHistory[];
-  features?: PuzzleFeatures;
-  trayNames?: Partial<Record<PuzzleTray, string>>;
-}
-export interface GameSnapshot extends PuzzleOptions { definition:PuzzleDefinition; groups:PuzzleGroup[]; trays?: PuzzleTray[] }
-export interface GameDelta extends PuzzleOptions { groups:PuzzleGroup[]; removed:string[]; trays?: PuzzleTray[] }
+export interface CollectionPosition { dx: number; dy: number; stored: boolean }
+export interface GameSnapshot { fieldSize?: FieldSize; definition:PuzzleDefinition; groups:PuzzleGroup[]; arrangeHistory?: ArrangePosition[] }
+export interface GameDelta { fieldSize?: FieldSize; groups:PuzzleGroup[]; removed:string[] }
 
-export function featuresForSnapshot(snapshot: GameSnapshot, trays: readonly PuzzleTray[]): PuzzleFeatures {
-  return snapshot.features ?? { ...DEFAULT_PUZZLE_FEATURES, trays: trays.length > 0 };
-}
-
-export function traysForSnapshot(snapshot: { groups: readonly PuzzleGroup[]; trays?: PuzzleTray[] }): PuzzleTray[] {
-  return snapshot.trays ?? LEGACY_PUZZLE_TRAYS.filter(tray => snapshot.groups.some(group => group?.tray === tray));
-}
 function random(seed:number) { let value=seed>>>0;return ()=>{value=(Math.imul(value,1664525)+1013904223)>>>0;return value/4294967296;}; }
 export class PuzzleEngine {
   readonly tiles:Tile[];
   readonly groups=new Map<string,PuzzleGroup>();
-  private readonly arrangeHistory = new Map<PuzzleTray | null, Map<string, { dx: number; dy: number }>>();
+  private arrangeHistory = new Map<string, { dx: number; dy: number }>();
   private readonly membership=new Map<number,string>();
   private readonly bounds = new Map<string, PuzzleBounds>();
-  private readonly trays: PuzzleTray[];
-  private features: PuzzleFeatures;
-  private readonly trayNames: Partial<Record<PuzzleTray, string>> = {};
-
-  constructor(readonly definition:PuzzleDefinition, savedGroups?: readonly PuzzleGroup[], savedTrays?: PuzzleTray[],
-    options: PuzzleOptions = {}) {
+  constructor(readonly definition:PuzzleDefinition, savedGroups?: readonly PuzzleGroup[],
+    arrangeHistory: GameSnapshot["arrangeHistory"] = [], public fieldSize: FieldSize = 1) {
+    if (!isFieldSize(fieldSize)) this.fieldSize = 1;
     assertPieceCount(definition.pieceCount);
     this.tiles=generateTiles(definition.pieceCount,definition.seed,definition.shape);
-    const trays = traysForSnapshot({ groups: savedGroups ?? [], trays: savedTrays });
-    if (!Array.isArray(trays) || trays.length > MAX_PUZZLE_TRAYS ||
-      !trays.every(isPuzzleTray) || new Set(trays).size !== trays.length) throw new Error("Invalid saved trays");
-    this.trays = [...trays];
-    this.features = isPuzzleFeatures(options.features) ? { ...options.features } : { ...DEFAULT_PUZZLE_FEATURES, trays: trays.length > 0 };
-    for (const tray of trays) {
-      const name = normalizeTrayName(options.trayNames?.[tray]);
-      if (name) this.trayNames[tray] = name;
-    }
     if (savedGroups) {
       for (const group of savedGroups) {
         if (!group || !Array.isArray(group.pieces) || !group.pieces.length || typeof group.id !== "string" || this.groups.has(group.id) ||
-          !Number.isFinite(group.dx) || !Number.isFinite(group.dy) || typeof group.placed !== "boolean" ||
-          (group.tray !== undefined && (!this.trays.includes(group.tray) || group.placed))) throw new Error("Invalid saved group");
+          !Number.isFinite(group.dx) || !Number.isFinite(group.dy) || typeof group.placed !== "boolean") throw new Error("Invalid saved group");
         for (const piece of group.pieces) {
           if (!Number.isInteger(piece) || !this.tiles[piece] || this.membership.has(piece)) throw new Error("Invalid saved membership");
           this.membership.set(piece, group.id);
         }
         // The old browser sessions no longer own any pieces after a restore.
         const bounds = puzzleGroupBounds(this.tiles, group.pieces);
-        const position = group.placed ? { dx: 0, dy: 0 } : clampGroupToTable(bounds, group.dx, group.dy);
+        const position = group.placed ? { dx: 0, dy: 0 } : clampGroupToTable(bounds, group.dx, group.dy, this.table);
         this.bounds.set(group.id, bounds);
-        const restored = { ...group, ...position, pieces: [...group.pieces], owner: null };
-        if (!this.features.trays) delete restored.tray;
-        this.groups.set(group.id, restored);
+        this.groups.set(group.id, { id: group.id, pieces: [...group.pieces], ...position, placed: group.placed, owner: null, ...(!group.placed && group.stored === true ? { stored: true as const } : {}) });
       }
       if (this.membership.size !== this.tiles.length) throw new Error("Incomplete saved puzzle");
-      if (Array.isArray(options.arrangeHistory)) {
-        for (const entry of options.arrangeHistory) {
-          if (!entry || (entry.tray !== null && (!this.features.trays || !this.trays.includes(entry.tray))) ||
-            !Array.isArray(entry.positions)) continue;
-          const previous = new Map<string, { dx: number; dy: number }>();
-          for (const position of entry.positions) {
-            const group = position && this.groups.get(position.id);
-            if (!group || group.placed || group.pieces.length !== 1 || (group.tray ?? null) !== entry.tray ||
-              !Number.isFinite(position.dx) || !Number.isFinite(position.dy)) continue;
-            previous.set(group.id, clampGroupToTable(this.bounds.get(group.id)!, position.dx, position.dy));
-          }
-          if (previous.size) this.arrangeHistory.set(entry.tray, previous);
-        }
+      for (const position of arrangeHistory) {
+        const group = position && this.groups.get(position.id);
+        if (!group || group.placed || group.pieces.length !== 1 ||
+          !Number.isFinite(position.dx) || !Number.isFinite(position.dy)) continue;
+        this.arrangeHistory.set(group.id, clampGroupToTable(this.bounds.get(group.id)!, position.dx, position.dy, this.table));
       }
       return;
     }
@@ -89,62 +54,36 @@ export class PuzzleEngine {
       this.groups.set(group.id,group);this.membership.set(tile.id,group.id);
     }
   }
+  get table() { return fieldBounds(this.fieldSize); }
+  resizeField(size: FieldSize): GameDelta | null {
+    if (!isFieldSize(size) || size === this.fieldSize) return null;
+    this.fieldSize = size;
+    const groups: PuzzleGroup[] = [];
+    for (const g of this.groups.values()) {
+      const p = clampGroupToTable(this.bounds.get(g.id)!, g.dx, g.dy, this.table);
+      if (p.dx !== g.dx || p.dy !== g.dy) {
+        Object.assign(g,p);
+        groups.push({...g});
+      }
+    }
+    for (const [id, pos] of this.arrangeHistory) {
+      const bounds = this.bounds.get(id);
+      if (bounds) this.arrangeHistory.set(id,clampGroupToTable(bounds,pos.dx,pos.dy,this.table));
+    }
+    return {fieldSize:size,groups,removed:[]};
+  }
   snapshot():GameSnapshot {
-    return { definition: this.definition, groups: [...this.groups.values()].map(g => ({...g, pieces:[...g.pieces]})),
-      trays: [...this.trays], trayNames: { ...this.trayNames }, features: { ...this.features } };
+    return { fieldSize: this.fieldSize, definition: this.definition, groups: [...this.groups.values()].map(g => ({...g, pieces:[...g.pieces]})) };
   }
   saveSnapshot(): GameSnapshot {
-    const arrangeHistory = [...this.arrangeHistory].filter(([, positions]) => positions.size).map(([tray, positions]) => ({
-      tray, positions: [...positions].map(([id, position]) => ({ id, ...position })),
-    }));
+    const arrangeHistory = [...this.arrangeHistory].map(([id, position]) => ({ id, ...position }));
     return { ...this.snapshot(), ...(arrangeHistory.length ? { arrangeHistory } : {}) };
   }
-  createTray(): GameDelta | null {
-    if (!this.features.trays || this.trays.length >= MAX_PUZZLE_TRAYS) return null;
-    for (let index = 1; index <= MAX_PUZZLE_TRAYS; index++) {
-      const tray: PuzzleTray = `tray-${index}`;
-      if (this.trays.includes(tray)) continue;
-      this.trays.push(tray);
-      return { groups: [], removed: [], trays: [...this.trays] };
-    }
-    return null;
-  }
-  deleteTray(tray: PuzzleTray): GameDelta | null {
-    const index = this.trays.indexOf(tray);
-    if (!this.features.trays || index < 0) return null;
-    this.trays.splice(index, 1);
-    this.arrangeHistory.delete(tray);
-    delete this.trayNames[tray];
-    return { groups: this.emptyTrays(tray), removed: [], trays: [...this.trays], trayNames: { ...this.trayNames } };
-  }
-  renameTray(tray: PuzzleTray, value: unknown): GameDelta | null {
-    const name = normalizeTrayName(value);
-    if (!this.features.trays || !this.trays.includes(tray) || !name) return null;
-    this.trayNames[tray] = name;
-    return { groups: [], removed: [], trayNames: { ...this.trayNames } };
-  }
-  configureFeatures(features: PuzzleFeatures): GameDelta | null {
-    if (features.trays === this.features.trays && features.edgeFilter === this.features.edgeFilter) return null;
-    this.features = { ...features };
-    if (!features.trays) for (const tray of this.trays) this.arrangeHistory.delete(tray);
-    return { groups: features.trays ? [] : this.emptyTrays(), removed: [], features: { ...features } };
-  }
-  private emptyTrays(tray?: PuzzleTray): PuzzleGroup[] {
-    const groups: PuzzleGroup[] = [];
-    for (const group of this.groups.values()) {
-      if (!group.tray || (tray !== undefined && group.tray !== tray)) continue;
-      delete group.tray;
-      group.owner = null;
-      groups.push({ ...group });
-    }
-    return groups;
-  }
-  arrange(tray: PuzzleTray | null): GameDelta | null {
-    if (tray !== null && (!this.features.trays || !this.trays.includes(tray))) return null;
+  arrange(): GameDelta | null {
     const loose: { id: string; bounds: PuzzleBounds }[] = [];
     const obstacles: PuzzleBounds[] = [];
     for (const group of this.groups.values()) {
-      if ((group.tray ?? null) !== tray) continue;
+      if (group.stored) continue;
       const bounds = this.bounds.get(group.id)!;
       if (!group.placed && group.owner === null && group.pieces.length === 1) {
         loose.push({ id: group.id, bounds });
@@ -154,7 +93,7 @@ export class PuzzleEngine {
       }
     }
     if (!loose.length) return null;
-    const layout = arrangeLoosePieces(loose, obstacles);
+    const layout = arrangeLoosePieces(loose, obstacles, this.table);
     if (!layout) return null;
     const groups: PuzzleGroup[] = [];
     const previous = new Map<string, { dx: number; dy: number }>();
@@ -166,43 +105,77 @@ export class PuzzleEngine {
       groups.push({ ...group });
     }
     if (!groups.length) return null;
-    this.arrangeHistory.set(tray, previous);
+    this.arrangeHistory = previous;
     return { groups, removed: [] };
   }
-  undoArrange(tray: PuzzleTray | null): GameDelta | null {
-    const previous = this.arrangeHistory.get(tray);
-    if (!previous) return null;
+  undoArrange(): GameDelta | null {
+    const previous = this.arrangeHistory;
     const groups: PuzzleGroup[] = [];
     for (const [id, position] of previous) {
       const group = this.groups.get(id);
-      if (!group || group.placed || group.owner !== null || group.pieces.length !== 1 ||
-        (group.tray ?? null) !== tray) continue;
+      if (!group || group.stored || group.placed || group.owner !== null || group.pieces.length !== 1) continue;
       Object.assign(group, position);
       previous.delete(id);
       groups.push({ ...group });
     }
     return groups.length ? { groups, removed: [] } : null;
   }
-  grab(id:string,owner:string):GameDelta {
+  collect(ids: string[], action: "move" | "slide" | "store" | "restore", x: number, y: number): GameDelta | null {
+    const groups = [...new Set(ids)].map(id => this.groups.get(id));
+    if (!groups.length || groups.some(g => !g || g.owner || g.placed || !!g.stored !== (action === "restore"))) return null;
+    const picked = groups as PuzzleGroup[];
+    // Rigid moves share one translation. Sliding groups stop independently.
+    if (action !== "slide") for (const g of picked) {
+      const p = clampGroupToTable(this.bounds.get(g.id)!, g.dx + x, g.dy + y, this.table);
+      x = p.dx - g.dx;
+      y = p.dy - g.dy;
+    }
+    const slides = action === "slide"
+      ? slideCollection(picked.map(g => ({ id:g.id, dx:g.dx, dy:g.dy, bounds:this.bounds.get(g.id)! })), x, y, this.table)
+      : undefined;
+    for (const [index, g] of picked.entries()) {
+      const position = slides?.[index] ?? clampGroupToTable(this.bounds.get(g.id)!, g.dx+x, g.dy+y, this.table);
+      if (g.dx !== position.dx || g.dy !== position.dy || action === "store" || action === "restore") this.arrangeHistory.delete(g.id);
+      if (action === "store") g.stored = true;
+      else delete g.stored;
+      g.dx = position.dx;
+      g.dy = position.dy;
+    }
+    return { groups: picked.map(g => ({ ...g })), removed: [] };
+  }
+  undoCollection(positions: ReadonlyMap<string, CollectionPosition>): GameDelta | null {
+    if (!positions.size) return null;
+    for (const id of positions.keys()) {
+      const group = this.groups.get(id);
+      if (!group || group.owner || group.placed) return null;
+    }
+    const groups: PuzzleGroup[] = [];
+    for (const [id, position] of positions) {
+      const group = this.groups.get(id)!;
+      Object.assign(group, clampGroupToTable(this.bounds.get(id)!, position.dx, position.dy, this.table));
+      if (position.stored) group.stored = true;
+      else delete group.stored;
+      this.arrangeHistory.delete(id);
+      groups.push({ ...group });
+    }
+    return { groups, removed: [] };
+  }
+  grab(id:string,owner:string,additional = false):GameDelta {
     const group=this.groups.get(id);
-    if(!group||group.placed||(group.owner!==null&&group.owner!==owner)) return {groups:group?[{...group}]:[],removed:[]};
-    const released=this.releaseOwner(owner);group.owner=owner;return {groups:[...released.groups.filter(g=>g.id!==id),{...group}],removed:[]};
+    if(!group||group.stored||group.placed||(group.owner!==null&&group.owner!==owner)) return {groups:group?[{...group}]:[],removed:[]};
+    const released=additional ? { groups: [] } : this.releaseOwner(owner);group.owner=owner;return {groups:[...released.groups.filter(g=>g.id!==id),{...group}],removed:[]};
   }
   move(id:string,owner:string,dx:number,dy:number):GameDelta|null {
     const group=this.groups.get(id);
     if(!group||group.owner!==owner||group.placed||!Number.isFinite(dx)||!Number.isFinite(dy)) return null;
-    const position = clampGroupToTable(this.bounds.get(id)!, dx, dy);
-    if (group.dx !== position.dx || group.dy !== position.dy) this.arrangeHistory.get(group.tray ?? null)?.delete(id);
+    const position = clampGroupToTable(this.bounds.get(id)!, dx, dy, this.table);
+    if (group.dx !== position.dx || group.dy !== position.dy) this.arrangeHistory.delete(id);
     Object.assign(group, position);
     return {groups:[{...group}],removed:[]};
   }
   release(id:string,owner:string,dx:number,dy:number):GameDelta|null {
     if(!this.move(id,owner,dx,dy)) return null;
     const group=this.groups.get(id)!;
-    if (group.tray) {
-      group.owner = null;
-      return { groups: [{ ...group }], removed: [] };
-    }
     const removed:string[]=[];
     const tolerance=Math.max(4,Math.min(...group.pieces.map(p=>Math.min(this.tiles[p]!.width,this.tiles[p]!.height)))*.28);
     if(Math.hypot(group.dx,group.dy)<tolerance){group.dx=0;group.dy=0;group.placed=true;}
@@ -215,7 +188,7 @@ export class PuzzleEngine {
           const otherId=this.membership.get(neighbor)!;
           if(otherId===group.id)continue;
           const other=this.groups.get(otherId)!;
-          if(other.tray||(other.owner!==null&&other.owner!==owner))continue;
+          if(other.stored || other.owner!==null)continue;
           if(Math.hypot(group.dx-other.dx,group.dy-other.dy)>tolerance)continue;
           group.dx=other.dx;group.dy=other.dy;group.placed=group.placed||other.placed;
           group.pieces.push(...other.pieces);
@@ -226,17 +199,13 @@ export class PuzzleEngine {
         }
       }
     }
-    Object.assign(group, group.placed ? { dx: 0, dy: 0 } : clampGroupToTable(this.bounds.get(id)!, group.dx, group.dy));
+    Object.assign(group, group.placed ? { dx: 0, dy: 0 } : clampGroupToTable(this.bounds.get(id)!, group.dx, group.dy, this.table));
     group.owner=null;
     return {groups:[{...group,pieces:[...group.pieces]}],removed};
   }
-  stash(id: string, owner: string, tray: PuzzleTray | null, dx: number, dy: number): GameDelta | null {
-    if (tray !== null && (!this.features.trays || !this.trays.includes(tray))) return null;
+  cancelDrag(id: string, owner: string, dx: number, dy: number): GameDelta | null {
     if (!this.move(id, owner, dx, dy)) return null;
     const group = this.groups.get(id)!;
-    if ((group.tray ?? null) !== tray) this.arrangeHistory.get(group.tray ?? null)?.delete(id);
-    if (tray) group.tray = tray;
-    else delete group.tray;
     group.owner = null;
     return { groups: [{ ...group }], removed: [] };
   }

@@ -1,17 +1,18 @@
-import { TABLE_BOUNDS, TABLE_HEIGHT, TABLE_WIDTH, type PuzzleBounds } from "./geometry.js";
+import { TABLE_BOUNDS, type PuzzleBounds } from "./geometry.js";
 
 interface Item { id: string; bounds: PuzzleBounds }
 
 // Plan the entire layout before moving any group. Adjacent cells keep the silhouettes apart.
-export function arrangeLoosePieces(items: Item[], obstacles: PuzzleBounds[]) {
+export function arrangeLoosePieces(items: Item[], obstacles: PuzzleBounds[], table: PuzzleBounds = TABLE_BOUNDS) {
+  const tableWidth = table.right - table.left, tableHeight = table.bottom - table.top;
   if (items.length < 2 && obstacles.length === 0) return null;
   const gap = 8;
   const width = Math.max(1, ...items.map(({ bounds }) => bounds.right - bounds.left)) + gap;
   const height = Math.max(1, ...items.map(({ bounds }) => bounds.bottom - bounds.top)) + gap;
-  const columns = Math.floor(TABLE_WIDTH / width);
-  const rows = Math.floor(TABLE_HEIGHT / height);
-  const left = TABLE_BOUNDS.left + (TABLE_WIDTH - columns * width) / 2;
-  const top = TABLE_BOUNDS.top + (TABLE_HEIGHT - rows * height) / 2;
+  const columns = Math.floor(tableWidth / width);
+  const rows = Math.floor(tableHeight / height);
+  const left = table.left + (tableWidth - columns * width) / 2;
+  const top = table.top + (tableHeight - rows * height) / 2;
   const blocked = new Set<number>();
   for (const obstacle of obstacles) {
     const minX = Math.max(0, Math.floor((obstacle.left - left) / width));

@@ -93,6 +93,7 @@ export class ColyseusRoomGateway implements RoomGateway {
       }
     });
     room.onMessage("board-marker", (marker: BoardMarker) => listener({ type: "board-marker", marker }));
+    room.onMessage("collection-undo", (available: boolean) => listener({ type: "collection-undo", available }));
     room.onMessage("board-action-result", (result: BoardActionResult) => listener({ type: "board-action-result", result }));
     room.onMessage("players",(players:PlayerInfo[])=>listener({type:"players",players}));
     room.onMessage("save-error",(message:string)=>listener({type:"error",message}));

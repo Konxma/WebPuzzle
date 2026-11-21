@@ -44,7 +44,12 @@ export const puzzleLibrary = {
       (data.snapshot.definition.shape !== undefined && !isPuzzleShape(data.snapshot.definition.shape))) {
       throw new Error("Invalid saved puzzle");
     }
-    return data.snapshot;
+    const { definition, groups, arrangeHistory } = data.snapshot;
+    // Old saves stored undo positions by tray. Keep only the table history.
+    const positions = Array.isArray(arrangeHistory) ? arrangeHistory.flatMap(entry =>
+      entry?.tray === null && Array.isArray(entry.positions) ? entry.positions :
+        typeof entry?.id === "string" ? [entry] : []) : [];
+    return { definition, groups, fieldSize: data.snapshot.fieldSize, arrangeHistory: positions };
   },
   save(key: string, snapshot: GameSnapshot) {
     const target = file("saves", key, "json");

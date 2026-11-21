@@ -12,29 +12,6 @@ export function isPuzzleShape(value: unknown): value is PuzzleShape {
   return PUZZLE_SHAPES.some(shape => shape === value);
 }
 export const MAX_PUZZLE_PHOTO_BYTES = 6 * 1024 * 1024;
-export const LEGACY_PUZZLE_TRAYS = ["sky", "water", "later"] as const;
-export const MAX_PUZZLE_TRAYS = 8;
-export const MAX_TRAY_NAME_LENGTH = 40;
-export interface PuzzleFeatures { trays: boolean; edgeFilter: boolean }
-export const DEFAULT_PUZZLE_FEATURES: PuzzleFeatures = { trays: false, edgeFilter: false };
-
-export function isPuzzleFeatures(value: unknown): value is PuzzleFeatures {
-  return typeof value === "object" && value !== null &&
-    "trays" in value && typeof value.trays === "boolean" &&
-    "edgeFilter" in value && typeof value.edgeFilter === "boolean";
-}
-
-export function normalizeTrayName(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const name = value.trim();
-  return name.length > 0 && name.length <= MAX_TRAY_NAME_LENGTH && !/[\u0000-\u001f\u007f]/.test(name) ? name : null;
-}
-export type PuzzleTray = typeof LEGACY_PUZZLE_TRAYS[number] | `tray-${number}`;
-export function isPuzzleTray(value: unknown): value is PuzzleTray {
-  if (LEGACY_PUZZLE_TRAYS.some(tray => tray === value)) return true;
-  if (typeof value !== "string" || !/^tray-[1-9]\d*$/.test(value)) return false;
-  return Number(value.slice(5)) <= MAX_PUZZLE_TRAYS;
-}
 export function isPuzzleFileId(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
 }

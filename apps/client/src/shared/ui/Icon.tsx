@@ -1,4 +1,5 @@
 import PuzzleIcon from "@gentleface/react/icons/puzzle";
+import RotateCcwIcon from "@gentleface/react/icons/rotate-ccw";
 import RotateCwIcon from "@gentleface/react/icons/rotate-cw";
 import UsersIcon from "@gentleface/react/icons/users";
 import MonitorIcon from "@gentleface/react/icons/monitor";
@@ -19,7 +20,7 @@ import MapPinIcon from "@gentleface/react/icons/map-pin";
 const icons = {
   settings: SettingsIcon, mapPin: MapPinIcon, check: CheckIcon,
   chevronUp: ChevronUpIcon, chevronDown: ChevronDownIcon, close: CloseIcon,
-  puzzle: PuzzleIcon, refresh: RotateCwIcon, people: UsersIcon, monitor: MonitorIcon,
+  puzzle: PuzzleIcon, refresh: RotateCwIcon, undo: RotateCcwIcon, people: UsersIcon, monitor: MonitorIcon,
   moon: MoonIcon, sun: SunIcon, maximize: MaximizeIcon, minimize: MinimizeIcon,
   sidebarClose: SidebarCloseIcon, sidebarOpen: SidebarOpenIcon,
 };

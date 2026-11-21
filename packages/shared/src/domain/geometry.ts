@@ -6,6 +6,13 @@ export interface PuzzleBounds { left: number; top: number; right: number; bottom
 
 export const SCATTER_BOUNDS = { left: -600, top: -400, right: BOARD_WIDTH + 600, bottom: BOARD_HEIGHT + 400 } as const;
 export const TABLE_BOUNDS = { left: -1600, top: -1050, right: BOARD_WIDTH + 1600, bottom: BOARD_HEIGHT + 1050 } as const;
+export const FIELD_SIZES = [1, 1.5, 2] as const;
+export type FieldSize = typeof FIELD_SIZES[number];
+export const isFieldSize = (value: unknown): value is FieldSize => FIELD_SIZES.some(size => size === value);
+export function fieldBounds(size: FieldSize = 1): PuzzleBounds {
+  return { left: TABLE_BOUNDS.left * size, top: TABLE_BOUNDS.top * size,
+    right: BOARD_WIDTH - TABLE_BOUNDS.left * size, bottom: BOARD_HEIGHT - TABLE_BOUNDS.top * size };
+}
 export const TABLE_WIDTH = TABLE_BOUNDS.right - TABLE_BOUNDS.left;
 export const TABLE_HEIGHT = TABLE_BOUNDS.bottom - TABLE_BOUNDS.top;
 
@@ -33,10 +40,10 @@ export function puzzleGroupBounds(tiles: readonly Tile[], pieces: readonly numbe
   return bounds;
 }
 
-export function clampGroupToTable(bounds: PuzzleBounds, dx: number, dy: number) {
+export function clampGroupToTable(bounds: PuzzleBounds, dx: number, dy: number, table: PuzzleBounds = TABLE_BOUNDS) {
   return {
-    dx: Math.max(TABLE_BOUNDS.left - bounds.left, Math.min(TABLE_BOUNDS.right - bounds.right, dx)),
-    dy: Math.max(TABLE_BOUNDS.top - bounds.top, Math.min(TABLE_BOUNDS.bottom - bounds.bottom, dy)),
+    dx: Math.max(table.left - bounds.left, Math.min(table.right - bounds.right, dx)),
+    dy: Math.max(table.top - bounds.top, Math.min(table.bottom - bounds.bottom, dy)),
   };
 }
 export type DrawCommand = { op: "M" | "L"; values: [number, number] } | { op: "C"; values: [number, number, number, number, number, number] } | { op: "Z"; values: [] };

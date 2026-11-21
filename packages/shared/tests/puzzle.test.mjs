@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { TABLE_BOUNDS, MAX_PUZZLE_TRAYS, puzzleGroupBounds, generateTiles, puzzleSeamPath, PUZZLE_SHAPES, BOARD_WIDTH, BOARD_HEIGHT, PuzzleEngine, isValidPieceCount } from "../dist/index.js";
+import { TABLE_BOUNDS, puzzleGroupBounds, generateTiles, puzzleSeamPath, PUZZLE_SHAPES, BOARD_WIDTH, BOARD_HEIGHT, slideCollection, PuzzleEngine, isValidPieceCount } from "../dist/index.js";
 
 test("exact counts, full coverage, finite curves, symmetric neighbors and deterministic generation",()=>{
   for(const count of [1,2,7,24,97,997,1000,2999,3000]){
@@ -111,49 +111,23 @@ test("neighboring pieces merge, locked groups cannot be stolen, placement comple
   const placed=[...game.groups.values()][0];
   assert.equal(game.move(placed.id,"alice",100,100),null);
 });
-test("new rooms start without trays, and old occupied trays and outlying groups are restored", () => {
-  const game = engine();
-  assert.deepEqual(game.snapshot().trays, []);
+test("canceling a drag restores the starting position without snapping", () => {
+  const game = engine(24);
+  const original = { ...game.groups.get("0") };
   game.grab("0", "alice");
-  assert.equal(game.stash("0", "alice", "tray-1", 0, 0), null);
-  assert.equal(game.stash("0", "alice", "sky", 0, 0), null);
-  assert.equal(game.createTray(), null);
-  game.configureFeatures({ trays: true, edgeFilter: true });
-  for (let n = 1; n <= MAX_PUZZLE_TRAYS; n++) {
-    assert.equal(game.createTray().trays.at(-1), `tray-${n}`);
-  }
-  assert.equal(game.createTray(), null);
-  assert.equal(game.renameTray("tray-1", "   "), null);
-  assert.deepEqual(game.renameTray("tray-1", "  Небо  ").trayNames, { "tray-1": "Небо" });
-  game.stash("0", "alice", "tray-1", 100, 100);
-  game.grab("0", "bob");
-  const disabled = game.configureFeatures({ trays: false, edgeFilter: false });
-  assert.equal(disabled.groups[0].tray, undefined);
-  assert.equal(disabled.groups[0].owner, null);
-  assert.equal(game.snapshot().trayNames["tray-1"], "Небо");
-  assert.equal(game.createTray(), null);
-
-  const { definition, groups } = game.snapshot();
-  groups[0] = { ...groups[0], tray: "water", dx: 5000, dy: -5000 };
-  const restored = new PuzzleEngine(definition, groups);
-  assert.deepEqual(restored.snapshot().trays, ["water"]);
-  const group = restored.groups.get("0");
-  const bounds = puzzleGroupBounds(restored.tiles, group.pieces);
-  assert.equal(group.dx + bounds.right, TABLE_BOUNDS.right);
-  assert.equal(group.dy + bounds.top, TABLE_BOUNDS.top);
-  assert.equal(group.owner, null);
+  game.move("0", "alice", 100, 100);
+  assert.equal(game.cancelDrag("0", "bob", 0, 0), null);
+  assert.deepEqual(game.cancelDrag("0", "alice", original.dx, original.dy).groups[0], original);
+  game.grab("0", "alice");
+  const canceled = game.cancelDrag("0", "alice", 0, 0).groups[0];
+  assert.equal(canceled.placed, false);
+  assert.equal(canceled.owner, null);
 });
 
-test("arranging clears overlaps and preserves assembled, held and other-tray groups", () => {
+test("arranging clears overlaps and preserves assembled and held groups", () => {
   const game = engine(24);
-  game.configureFeatures({ trays: true, edgeFilter: false });
-  game.createTray();
   game.grab("0", "alice");
   game.release("0", "alice", 0, 0);
-  game.grab("1", "alice");
-  game.stash("1", "alice", "tray-1", 0, 0);
-  game.grab("2", "alice");
-  game.stash("2", "alice", "tray-1", 0, 0);
   game.grab("3", "alice");
   for (const id of ["4", "5"]) {
     const tile = game.tiles[Number(id)];
@@ -170,21 +144,53 @@ test("arranging clears overlaps and preserves assembled, held and other-tray gro
   const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
   const before = game.snapshot();
   assert.ok(overlaps(bounds(before.groups.find(g => g.id === "4")), bounds(before.groups.find(g => g.id === "5"))));
-  assert.ok(game.arrange(null)?.groups.length);
+  assert.ok(game.arrange()?.groups.length);
   const after = game.snapshot();
-  for (const id of ["0", "1", "2", "3"]) {
+  for (const id of ["0", "3"]) {
     assert.deepEqual(after.groups.find(group => group.id === id), before.groups.find(group => group.id === id));
   }
-  const table = after.groups.filter(group => !group.tray);
+  const table = after.groups;
   for (const group of table.filter(group => !group.placed && group.owner === null)) {
     const box = bounds(group);
     assert.ok(table.every(other => other.id === group.id || !overlaps(box, bounds(other))));
     assert.ok(box.left >= TABLE_BOUNDS.left && box.right <= TABLE_BOUNDS.right);
     assert.ok(box.top >= TABLE_BOUNDS.top && box.bottom <= TABLE_BOUNDS.bottom);
   }
-  assert.ok(game.arrange("tray-1")?.groups.length);
-  assert.ok(!overlaps(bounds(game.groups.get("1")), bounds(game.groups.get("2"))));
-  assert.deepEqual(game.snapshot().groups.filter(group => !group.tray), table);
+  const saved = game.saveSnapshot();
+  const restored = new PuzzleEngine(saved.definition, saved.groups, saved.arrangeHistory);
+  assert.ok(restored.undoArrange()?.groups.length);
+  assert.deepEqual(restored.snapshot().groups.map(({dx, dy}) => ({dx, dy})),
+    before.groups.map(({dx, dy}) => ({dx, dy})));
+});
+
+test("a full 3000-piece collection moves together and survives storage and restore", () => {
+  const game = engine(3000), ids = [...game.groups.keys()];
+  game.grab(ids[0], "guest", true);
+  game.grab(ids[1], "guest", true);
+  assert.equal(game.collect(ids, "store", 0, 0), null);
+  assert.equal(game.releaseOwner("guest").groups.length, 2);
+  const before = game.snapshot().groups;
+  const moved = game.collect(ids, "move", 1e5, -1e5);
+  const dx = moved.groups[0].dx - before[0].dx, dy = moved.groups[0].dy - before[0].dy;
+  assert.ok(moved.groups.every((g,i) => Math.abs(g.dx-before[i].dx-dx)<1e-7 && Math.abs(g.dy-before[i].dy-dy)<1e-7));
+  assert.equal(game.collect(ids, "store", 0, 0).groups.length, 3000);
+  const saved = game.saveSnapshot(), restored = new PuzzleEngine(saved.definition, saved.groups);
+  assert.equal(restored.arrange(), null);
+  assert.equal(restored.collect(ids, "restore", 0, 0).groups.length, 3000);
+});
+
+test("expanded margins allow movement and survive restore; shrinking brings pieces inside", () => {
+  const game = engine(24);
+  assert.equal(game.resizeField(2).fieldSize,2);
+  game.collect(["0","1"],"move",20000,0);
+  const saved = game.saveSnapshot();
+  const restored = new PuzzleEngine(saved.definition,saved.groups,saved.arrangeHistory,saved.fieldSize);
+  assert.deepEqual(restored.snapshot(),game.snapshot());
+  const right = g => puzzleGroupBounds(restored.tiles,g.pieces).right + g.dx;
+  assert.ok(Math.max(...[...restored.groups.values()].map(right)) > TABLE_BOUNDS.right);
+  const change = restored.resizeField(1);
+  assert.ok(change.groups.length);
+  assert.ok([...restored.groups.values()].every(g=>right(g)<=TABLE_BOUNDS.right+1e-7));
 });
 
 test("single piece can complete; snapshots cannot mutate the engine",()=>{
@@ -193,4 +199,21 @@ test("single piece can complete; snapshots cannot mutate the engine",()=>{
   assert.equal(game.groups.get("0").pieces.length,1);
   game.grab("0","alice");game.release("0","alice",0,0);
   assert.equal(game.groups.get("0").placed,true);
+});
+
+test("collection physics separates overlapping groups along each wall", () => {
+  const table = { left: 0, top: 0, right: 200, bottom: 200 };
+  const bounds = { left: 0, top: 0, right: 20, bottom: 20 };
+  const groups = [{ id:"a", dx:40, dy:40, bounds }, { id:"b", dx:45, dy:45, bounds }];
+  assert.deepEqual(slideCollection(groups, 2, 3, table), [
+    { id:"a", dx:42, dy:43 }, { id:"b", dx:47, dy:48 },
+  ]);
+  for (const [x, y, wall] of [[-300,0,0], [300,0,180], [0,-300,0], [0,300,180]]) {
+    const [a, b] = slideCollection(groups, x, y, table);
+    const normal = x ? "dx" : "dy", tangent = x ? "dy" : "dx";
+    assert.equal(a[normal], wall);
+    assert.equal(b[normal], wall);
+    assert.ok(Math.abs(a[tangent] - b[tangent]) >= 20);
+    assert.ok(b[tangent] >= 0 && b[tangent] <= 180);
+  }
 });

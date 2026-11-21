@@ -1,26 +1,14 @@
 using System;
-using Microsoft.Win32;
-using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
-internal sealed class WebPuzzleLauncher : Form
+internal sealed partial class WebPuzzleLauncher : Form
 {
-#if EMBEDDED_PACKAGE
-    private string root;
-#else
-    private readonly string root = AppDomain.CurrentDomain.BaseDirectory;
-#endif
-    private readonly string address = "http://localhost:" +
-        (Environment.GetEnvironmentVariable("WEBPUZZLE_PORT") ?? "5174") + "/";
     private static readonly string AppDirectory = Path.Combine(
         Environment.GetEnvironmentVariable("LOCALAPPDATA") ??
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WebPuzzle");
-    private readonly string themePath = Path.Combine(AppDirectory, "launcher-theme");
     private readonly LauncherArtwork artwork = new LauncherArtwork(AppDirectory);
     private readonly PictureBox banner = new PictureBox { SizeMode = PictureBoxSizeMode.StretchImage };
     private readonly LauncherButton choosePhoto = new LauncherButton();
@@ -32,10 +20,6 @@ internal sealed class WebPuzzleLauncher : Form
     private readonly RadioButton darkTheme = new RadioButton { Appearance = Appearance.Button, Text = "Темна" };
     private readonly Button minimize = new LauncherButton();
     private readonly Button close = new LauncherButton();
-    private enum ThemeMode { System, Light, Dark }
-    private ThemeMode themeMode;
-    private bool themeInitialized;
-    private bool dark;
     private readonly Panel statusDot = new Panel();
     private readonly Label status = new Label();
     private readonly LauncherButton play = new LauncherButton();
@@ -60,12 +44,6 @@ internal sealed class WebPuzzleLauncher : Form
         }
     }
 
-    private Process server;
-    private bool ready;
-    private bool busy;
-
-    private const int SettingsChanged = 0x001A;
-    private const int WindowsThemeChanged = 0x031A;
     private const int NonClientLeftButtonDown = 0x00A1;
     private static readonly IntPtr CaptionArea = new IntPtr(2);
     [DllImport("user32.dll")]
@@ -84,6 +62,7 @@ internal sealed class WebPuzzleLauncher : Form
     private WebPuzzleLauncher()
     {
         Text = "WebPuzzle";
+        Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.None;
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -180,27 +159,6 @@ internal sealed class WebPuzzleLauncher : Form
 #endif
     }
 
-#if EMBEDDED_PACKAGE
-    private async Task PrepareGame()
-    {
-        busy = true;
-        SetState("Готуємо файли гри…");
-        string message;
-        try
-        {
-            root = await Task.Run(() => EmbeddedGame.Prepare());
-            message = "Гра готова до запуску.";
-        }
-        catch (Exception error)
-        {
-            if (!(error is IOException || error is UnauthorizedAccessException || error is InvalidDataException)) throw;
-            message = "Не вдалося підготувати гру. Перевірте вільне місце та повторіть запуск.";
-        }
-        busy = false;
-        if (!IsDisposed) SetState(message);
-    }
-#endif
-
     private void RefreshBanner()
     {
         var previous = banner.Image;
@@ -248,132 +206,6 @@ internal sealed class WebPuzzleLauncher : Form
         }
     }
 
-    protected override void WndProc(ref Message message)
-    {
-        base.WndProc(ref message);
-        if (message.Msg == SettingsChanged || message.Msg == WindowsThemeChanged) RefreshSystemTheme();
-    }
-
-    private void RefreshSystemTheme()
-    {
-        if (!themeInitialized || IsDisposed || themeMode != ThemeMode.System) return;
-        var systemDark = ResolveDarkTheme();
-        if (systemDark == dark) return;
-        dark = systemDark;
-        ApplyTheme();
-    }
-
-    private bool ResolveDarkTheme()
-    {
-        if (themeMode != ThemeMode.System) return themeMode == ThemeMode.Dark;
-        try
-        {
-            var preference = Registry.GetValue(
-                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-                "AppsUseLightTheme", 1);
-            return preference is int && (int)preference == 0;
-        }
-        catch (System.Security.SecurityException) { return false; }
-        catch (UnauthorizedAccessException) { return false; }
-        catch (IOException) { return false; }
-    }
-
-    private void ChangeTheme(ThemeMode mode)
-    {
-        if (themeMode == mode) return;
-        themeMode = mode;
-        dark = ResolveDarkTheme();
-        ApplyTheme();
-        SaveTheme();
-    }
-
-    private ThemeMode LoadTheme()
-    {
-        try
-        {
-            if (File.Exists(themePath))
-            {
-                var saved = File.ReadAllText(themePath);
-                if (saved == "dark") return ThemeMode.Dark;
-                if (saved == "light") return ThemeMode.Light;
-            }
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-        return ThemeMode.System;
-    }
-
-    private void SaveTheme()
-    {
-        try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(themePath));
-            File.WriteAllText(themePath, themeMode.ToString().ToLowerInvariant());
-        }
-        catch (IOException) { }
-        catch (UnauthorizedAccessException) { }
-    }
-
-    private Color PlayColor()
-    {
-        if (dark) return busy ? Color.FromArgb(69, 78, 67) : Color.FromArgb(187, 213, 189);
-        return busy ? Color.FromArgb(230, 235, 227) : Color.FromArgb(40, 78, 62);
-    }
-
-    private void ApplyTheme()
-    {
-        var surface = dark ? Color.FromArgb(32, 33, 30) : Color.FromArgb(250, 249, 245);
-        var chrome = dark ? Color.FromArgb(27, 29, 25) : Color.FromArgb(238, 239, 231);
-        var text = dark ? Color.FromArgb(242, 239, 231) : Color.FromArgb(36, 57, 47);
-        var muted = dark ? Color.FromArgb(188, 190, 178) : Color.FromArgb(88, 98, 89);
-        var border = dark ? Color.FromArgb(85, 90, 79) : Color.FromArgb(191, 198, 184);
-        var hover = dark ? Color.FromArgb(52, 55, 47) : Color.FromArgb(223, 227, 215);
-
-        BackColor = surface;
-        ForeColor = text;
-        titleBar.BackColor = chrome;
-        status.ForeColor = muted;
-        statusDot.ForeColor = dark ? Color.FromArgb(187, 213, 189) : Color.FromArgb(40, 78, 62);
-        themeLabel.ForeColor = text;
-        systemTheme.Checked = themeMode == ThemeMode.System;
-        lightTheme.Checked = themeMode == ThemeMode.Light;
-        darkTheme.Checked = themeMode == ThemeMode.Dark;
-        var selected = dark ? Color.FromArgb(187, 213, 189) : Color.FromArgb(210, 225, 207);
-        var selectedText = Color.FromArgb(32, 54, 44);
-        foreach (var option in new[] { systemTheme, lightTheme, darkTheme })
-        {
-            ConfigureButton(option, chrome, option.Checked ? selectedText : text, option.Checked ? selected : hover, border);
-            option.FlatAppearance.CheckedBackColor = selected;
-        }
-        foreach (var button in new[] { minimize, close })
-        {
-            ConfigureButton(button, chrome, text, hover, border);
-            button.FlatAppearance.BorderSize = 0;
-        }
-        close.FlatAppearance.MouseOverBackColor = dark ? Color.FromArgb(100, 58, 51) : Color.FromArgb(235, 215, 206);
-        ConfigureButton(play, PlayColor(), dark ? Color.FromArgb(26, 40, 29) : Color.White,
-            dark ? Color.FromArgb(210, 230, 211) : Color.FromArgb(52, 95, 77), border);
-        ConfigureButton(stop, surface, text, hover, border);
-        ConfigureButton(choosePhoto, surface, text, hover, border);
-        ConfigureButton(resetPhoto, surface, text, hover, border);
-        play.DisabledColor = muted;
-        stop.DisabledColor = muted;
-        choosePhoto.DisabledColor = muted;
-        resetPhoto.DisabledColor = muted;
-        statusDot.Invalidate();
-    }
-
-    private static void ConfigureButton(ButtonBase button, Color background, Color foreground, Color hover, Color border)
-    {
-        button.FlatStyle = FlatStyle.Flat;
-        button.UseVisualStyleBackColor = false;
-        button.BackColor = background;
-        button.ForeColor = foreground;
-        button.FlatAppearance.BorderColor = border;
-        button.FlatAppearance.MouseOverBackColor = hover;
-        button.FlatAppearance.MouseDownBackColor = hover;
-    }
-
     private void SetState(string message)
     {
         status.Text = message;
@@ -386,108 +218,4 @@ internal sealed class WebPuzzleLauncher : Form
         stop.Enabled = !busy && ready && server != null;
     }
 
-    private async Task StartGame()
-    {
-        var node = Path.Combine(root, @"runtime\node.exe");
-        var script = Path.Combine(root, @"scripts\start.mjs");
-        if (!File.Exists(node) || !File.Exists(script))
-        {
-            SetState("Розпакуйте всю папку WebPuzzle з архіву.");
-            return;
-        }
-
-        ready = false;
-        busy = true;
-        SetState("Запускаємо гру…");
-        var start = new ProcessStartInfo(node, "scripts\\start.mjs") {
-            WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
-            StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8
-        };
-        start.EnvironmentVariables["WEBPUZZLE_MANAGED"] = "1";
-        try
-        {
-            var process = Process.Start(start);
-            server = process;
-            var errors = process.StandardError.ReadToEndAsync();
-            var timeout = Task.Delay(TimeSpan.FromSeconds(12));
-            while (server == process)
-            {
-                var next = process.StandardOutput.ReadLineAsync();
-                if (await Task.WhenAny(next, timeout) == timeout)
-                    throw new InvalidOperationException("Запуск триває надто довго. Спробуйте ще раз.");
-                var line = await next;
-                if (line == null)
-                {
-                    var message = (await errors).Trim();
-                    throw new InvalidOperationException(message.StartsWith("Не вдалося") ?
-                        message.Substring(message.IndexOf('\n') + 1).Trim() : "Не вдалося запустити гру.");
-                }
-                if (line == "WEBPUZZLE_READY")
-                {
-                    ready = true;
-                    busy = false;
-                    SetState("Гра запущена. Залиште це вікно відкритим.");
-                    OpenGame();
-                    await WatchServer(process);
-                    return;
-                }
-                if (line == "WEBPUZZLE_REUSED")
-                {
-                    StopServer();
-                    ready = true;
-                    busy = false;
-                    SetState("Гра вже працює в іншому вікні.");
-                    OpenGame();
-                    return;
-                }
-            }
-        }
-        catch (Exception error)
-        {
-            if (IsDisposed) return;
-            StopServer();
-            SetState(error is InvalidOperationException ? error.Message : "Перевірте, чи розпаковано всі файли гри.");
-        }
-    }
-
-    private async Task WatchServer(Process process)
-    {
-        try { await process.StandardOutput.ReadToEndAsync(); }
-        catch (ObjectDisposedException) { return; }
-        if (server != process || IsDisposed) return;
-        StopServer();
-        SetState("Гру зупинено. Можна запустити її знову.");
-    }
-
-    private void OpenGame()
-    {
-        // The package smoke test opens its own browser.
-        if (Environment.GetEnvironmentVariable("WEBPUZZLE_NO_BROWSER") == "1") return;
-        try { Process.Start(new ProcessStartInfo(address) { UseShellExecute = true }); }
-        catch (System.ComponentModel.Win32Exception) { SetState("Відкрийте в браузері " + address); }
-    }
-
-    private void StopServer()
-    {
-        var process = server;
-        server = null;
-        ready = false;
-        busy = false;
-        if (process == null) return;
-        using (process)
-        {
-            try { process.StandardInput.Close(); }
-            catch (IOException) { }
-            if (process.WaitForExit(3500)) return;
-            try { process.Kill(); }
-            catch (InvalidOperationException) { }
-        }
-    }
-
-    protected override void OnFormClosing(FormClosingEventArgs e)
-    {
-        base.OnFormClosing(e);
-        if (!e.Cancel) StopServer();
-    }
 }

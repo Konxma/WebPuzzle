@@ -72,7 +72,7 @@ async function backendReady() {
     const response = await fetch("http://127.0.0.1:3001/api/health", { signal: AbortSignal.timeout(1500) });
     if (!response.ok) return false;
     const status = await response.json();
-    return status.service === "web-pazle-server" && status.undoArrange === true && status.maxPlayers === MAX_ROOM_PLAYERS;
+    return status.service === "web-pazle-server" && status.undoArrange === true && status.adjustableField === true && status.maxPlayers === MAX_ROOM_PLAYERS;
   } catch { return false; }
 }
 function start(args: string[], cwd = root) {
@@ -95,7 +95,7 @@ process.on("SIGTERM", () => stop());
 async function main() {
 const running = await gameAlreadyRunning();
 if (running) {
-  if (running.undoArrange !== true || running.maxPlayers !== MAX_ROOM_PLAYERS) {
+  if (running.undoArrange !== true || running.adjustableField !== true || running.maxPlayers !== MAX_ROOM_PLAYERS) {
     console.log("Працює попередня версія WebPuzzle. Закрийте початкове вікно запуску гри, знову відкрийте Start.cmd та оновіть сторінку.");
     return;
   }

@@ -1,0 +1,212 @@
+.photo-setting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin-top: var(--space-16);
+  max-width: 440px;
+}
+
+.photo-picker {
+  position: relative;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.photo-picker:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.photo-picker input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.photo-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  color: var(--secondary);
+  font-size: var(--font-meta);
+}
+
+.saved-puzzles {
+  max-width: 440px;
+  margin-top: var(--space-24);
+  padding-top: var(--space-16);
+  border-top: 1px solid var(--line);
+}
+
+.saved-puzzles h2 {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0 0 var(--space-8);
+}
+
+.saved-puzzles ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--space-4) 0 0;
+  max-height: 380px;
+  overflow: auto;
+}
+
+.saved-puzzles li {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-8) var(--space-12);
+  padding-block: var(--space-12);
+}
+
+.saved-puzzles li + li {
+  border-top: 1px solid var(--line);
+}
+
+.saved-puzzles img {
+  width: 64px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: var(--radius-detail);
+}
+
+.saved-puzzle-label {
+  min-width: 0;
+  font-size: var(--font-meta);
+  overflow-wrap: anywhere;
+}
+
+.saved-puzzle-label h3 {
+  margin: 0;
+  font-size: var(--font-control);
+  font-weight: 600;
+}
+
+.saved-puzzle-label small {
+  display: block;
+  margin-top: var(--space-4);
+  color: var(--muted);
+}
+
+.saved-puzzle-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-4) var(--space-8);
+}
+
+.saved-puzzle-progress progress {
+  width: 72px;
+  height: 6px;
+  align-self: center;
+  margin-top: var(--space-4);
+  accent-color: var(--accent);
+}
+
+.saved-puzzle-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-8);
+}
+
+.delete-save {
+  color: var(--danger);
+}
+
+.delete-puzzle-dialog {
+  width: min(420px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  padding: var(--space-24);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-dialog);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.delete-puzzle-dialog::backdrop {
+  background: var(--dialog-backdrop);
+}
+
+.delete-puzzle-dialog h2 {
+  margin: 0;
+  font-size: 1.3125rem;
+  font-weight: 600;
+}
+
+.delete-puzzle-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  margin-top: var(--space-16);
+  padding: var(--space-12);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-control);
+  background: var(--board-background);
+}
+
+.delete-puzzle-preview img {
+  width: 72px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: var(--radius-detail);
+}
+
+.delete-puzzle-preview .saved-puzzle-label {
+  font-size: var(--font-control);
+}
+
+.rename-puzzle-form label {
+  display: block;
+  margin: var(--space-16) 0 var(--space-8);
+  font-size: var(--font-meta);
+  color: var(--secondary);
+}
+
+.rename-puzzle-form input {
+  width: 100%;
+  min-height: max(40px, var(--control-height));
+  padding: var(--space-8) var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--input);
+  color: var(--text);
+}
+
+.rename-puzzle-form input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.rename-puzzle-form .field-error {
+  color: var(--danger);
+}
+
+.delete-puzzle-dialog p {
+  margin: var(--space-16) 0 0;
+  color: var(--secondary);
+  font-size: var(--font-control);
+  line-height: 1.5;
+}
+
+.delete-puzzle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  margin-top: var(--space-24);
+}
+
+.delete-puzzle-confirm {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: var(--page);
+}
+
+.delete-puzzle-confirm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 90%, var(--page));
+}

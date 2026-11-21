@@ -13,13 +13,15 @@ const homePage = clientDir ? portableHome(clientDir) : undefined;
 const server=new Server({
   transport:new WebSocketTransport({
     // Large initial boards must not hold up heartbeat replies on slower Wi-Fi.
+    // A collection can contain all 3000 group IDs in a single atomic command.
+    maxPayload: 32 * 1024,
     perMessageDeflate:{threshold:512,serverNoContextTakeover:true,clientNoContextTakeover:true},
     pingInterval:15000,
     pingMaxRetries:4,
   }),
   greet:false,
   express:app=>{
-    app.get("/api/health",(_request:IncomingMessage,response:ServerResponse)=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({status:"ok",service:"web-pazle-server",boardActions:true,undoArrange:true,maxPlayers:MAX_ROOM_PLAYERS,launcherArtwork:!!homePage}));});
+    app.get("/api/health",(_request:IncomingMessage,response:ServerResponse)=>{response.writeHead(200,{"Content-Type":"application/json"});response.end(JSON.stringify({status:"ok",service:"web-pazle-server",boardActions:true,undoArrange:true,adjustableField:true,maxPlayers:MAX_ROOM_PLAYERS,launcherArtwork:!!homePage}));});
     app.post("/api/photos", uploadPhoto);
     app.get("/api/photos/:id", getPhoto);
     app.get("/api/saves/:id", getSaveStatus);

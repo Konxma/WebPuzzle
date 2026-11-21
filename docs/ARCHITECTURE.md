@@ -16,23 +16,28 @@
 | Завдання | Початковий файл |
 | --- | --- |
 | Запуск на Windows, пошук адреси, копіювання запрошення | [`Start.cmd`](../Start.cmd), [`scripts/start-lan.mts`](../scripts/start-lan.mts) |
-| Готовий Windows-пакет | [лаунчер](../scripts/portable/WebPuzzleLauncher.cs), [запуск сервера](../scripts/portable/start.mjs), [збірка EXE та ZIP](../scripts/package-windows.ps1) |
+| Готовий Windows-пакет | [вікно лаунчера](../scripts/portable/WebPuzzleLauncher.cs), [тема](../scripts/portable/WebPuzzleLauncher.Theme.cs), [запуск із лаунчера](../scripts/portable/WebPuzzleLauncher.Game.cs), [запуск сервера](../scripts/portable/start.mjs), [збірка EXE та ZIP](../scripts/package-windows.ps1) |
 | LAN API, проксі HTTP і WebSocket | [`apps/client/vite.config.ts`](../apps/client/vite.config.ts) |
 | Створення залежностей і вхід за посиланням | [`apps/client/src/app/App.tsx`](../apps/client/src/app/App.tsx) |
 | Стан кімнати для React та команди гравця | [`PuzzleViewModel.ts`](../apps/client/src/features/puzzle/viewmodels/PuzzleViewModel.ts) |
 | Підключення, токени повернення, повідомлення | [`ColyseusRoomGateway.ts`](../apps/client/src/infrastructure/realtime/ColyseusRoomGateway.ts) |
-| Камера, перетягування, підсвічування та кадри | [`PuzzleRenderer.ts`](../apps/client/src/features/puzzle/rendering/PuzzleRenderer.ts), [`FrameScheduler.ts`](../apps/client/src/features/puzzle/rendering/FrameScheduler.ts) |
+| Координація рендера й кадрів | [`PuzzleRenderer.ts`](../apps/client/src/features/puzzle/rendering/PuzzleRenderer.ts), [`FrameScheduler.ts`](../apps/client/src/features/puzzle/rendering/FrameScheduler.ts) |
+| Камера, мітки й текстури | [BoardCamera.ts](../apps/client/src/features/puzzle/rendering/BoardCamera.ts), [BoardHints.ts](../apps/client/src/features/puzzle/rendering/BoardHints.ts), [PieceAtlas.ts](../apps/client/src/features/puzzle/rendering/PieceAtlas.ts) |
+| Добірки й сенсорне керування | [BoardCollection.ts](../apps/client/src/features/puzzle/rendering/BoardCollection.ts), [BoardTouchInput.ts](../apps/client/src/features/puzzle/rendering/BoardTouchInput.ts) |
+| Налаштування, панель кімнати й збережені пазли | [PuzzleSettingsDialog.tsx](../apps/client/src/features/puzzle/views/PuzzleSettingsDialog.tsx), [PuzzleRoomPanel.tsx](../apps/client/src/features/puzzle/views/PuzzleRoomPanel.tsx), [SavedPuzzles.tsx](../apps/client/src/features/lobby/views/SavedPuzzles.tsx) |
+| Порядок підключення стилів | [styles.css](../apps/client/src/app/styles.css) |
 | Серверний життєвий цикл кімнати | [`apps/server/src/main.ts`](../apps/server/src/main.ts), [`PuzzleRoom.ts`](../apps/server/src/transport/realtime/PuzzleRoom.ts) |
+| Серверні команди добірки та скасування | [RoomCollections.ts](../apps/server/src/transport/realtime/RoomCollections.ts) |
 | Запис на диск і перевірка фото | [`PuzzleLibrary.ts`](../apps/server/src/infrastructure/PuzzleLibrary.ts), [`puzzleLibraryRoutes.ts`](../apps/server/src/transport/http/puzzleLibraryRoutes.ts) |
 | Контури, сусідство, блокування і з’єднання груп | [`geometry.ts`](../packages/shared/src/domain/geometry.ts), [`game.ts`](../packages/shared/src/domain/game.ts) |
 
 Клієнт побудований за MVVM. React викликає команди ViewModel, ViewModel працює через інтерфейс `RoomGateway`, а реалізація на Colyseus підставляється в `App.tsx`. Правила гри живуть у спільному пакеті. Сервер вирішує, кому належить група і чи можна її з’єднати або зафіксувати в рамці.
 
-Після входу клієнт підписується на повідомлення і надсилає `sync`. Сервер відповідає `snapshot`, з якого клієнт відновлює контури за кількістю деталей і seed. `motion` змінює положення однієї групи. `delta` передає зміну власника, об’єднання, фіксацію або перенесення в лоток. PixiJS оновлює поле поза React і малює кадр на запит. При обриві сервер звільняє захоплені деталі та тримає місце гравця до 60 секунд. Перезапуск закриває кімнати, збережені пазли можна відкрити знову.
+Після входу клієнт підписується на повідомлення і надсилає `sync`. Сервер відповідає `snapshot`, з якого клієнт відновлює контури за кількістю деталей і seed. `motion` змінює положення однієї групи. `delta` передає зміну власника, об’єднання або фіксацію. PixiJS оновлює поле поза React і малює кадр на запит. При обриві сервер звільняє захоплені деталі та тримає місце гравця до 60 секунд. Перезапуск закриває кімнати, збережені пазли можна відкрити знову.
 
 `PuzzleRoom` записує стан під час створення та після завершеної дії. Ключ збереження передається тільки творцю кімнати й запам’ятовується у `localStorage` для поточної адреси гри. Він не входить до посилання запрошення. При відновленні `PuzzleEngine` відбудовує членство деталей у групах і скидає блокування від попередніх сеансів. Перевірка `npm.cmd run test:saves` запускає окремий сервер із тимчасовою папкою, зупиняє його й перевіряє відновлення.
 
-Лоток є частиною серверного стану групи. Вибір лотка та «Лише краї» діють тільки на перегляд поточного клієнта. `PuzzlePhotos` нормалізує обране фото до JPEG, сервер зберігає його за випадковим ID. `PuzzleArtwork` використовує одне декодоване фото для атласу й видимих фрагментів при наближенні.
+«Лише краї» діє тільки на перегляд поточного клієнта. Деталі зі старих лотків повертаються на стіл при відкритті збереження. `PuzzlePhotos` нормалізує обране фото до JPEG, сервер зберігає його за випадковим ID. `PuzzleArtwork` використовує одне декодоване фото для атласу й видимих фрагментів при наближенні.
 
 ### Чіткість поля
 

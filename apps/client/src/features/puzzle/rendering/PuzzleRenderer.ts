@@ -1,12 +1,15 @@
+import { createBoardCollection } from "./BoardCollection";
+import { createBoardTouchInput } from "./BoardTouchInput";
+import { createBoardHints } from "./BoardHints";
 import { GroupSurfaceTextures } from "./GroupSurfaceTextures";
 import { FrameScheduler } from "./FrameScheduler";
 import { SharpPieceTextures, type DetailPiece } from "./SharpPieceTextures";
 import { loadPuzzleArtwork } from "./PuzzleArtwork";
 import { watchDisplayDensity } from "./displayDensity";
-import { detailResolution } from "./detailPolicy";
-import { Application, CanvasSource, Container, Graphics, Rectangle, Sprite, Texture, type FederatedPointerEvent } from "pixi.js";
-import { BOARD_MARKER_DURATION, BOARD_WIDTH, BOARD_HEIGHT, SCATTER_BOUNDS, TABLE_BOUNDS, TABLE_WIDTH, TABLE_HEIGHT, clampGroupToTable, puzzleGroupBounds, pathData, type BoardMarker, type PuzzleBounds, type PuzzleGroup, type PuzzleTray, type Tile } from "@web-pazle/shared";
-import type { CameraView } from "../models/PuzzleViewPreferences";
+import { createPieceAtlas } from "./PieceAtlas";
+import { Application, Container, Graphics, Rectangle, Sprite, Texture, type FederatedPointerEvent } from "pixi.js";
+import { BOARD_MARKER_DURATION, BOARD_WIDTH, BOARD_HEIGHT, fieldBounds, clampGroupToTable, puzzleGroupBounds, type BoardMarker, type PuzzleBounds, type PuzzleGroup, type Tile } from "@web-pazle/shared";
+import { createBoardCamera, type BoardCameraPreferences } from "./BoardCamera";
 import type { BoardChange, PuzzleViewModel } from "../viewmodels/PuzzleViewModel";
 export interface BoardControls { cameraLocked: boolean; clickToCarry: boolean }
 export interface PuzzleRenderer {
@@ -14,8 +17,10 @@ export interface PuzzleRenderer {
   zoom(factor: number): void;
   fit(): void;
   refreshPalette(): void;
+  setCollectionMode(active: boolean): void;
+  storeSelected(): void;
+  restoreTray(): void;
   setControls(controls: BoardControls): void;
-  dropOnTray(tray: PuzzleTray | null): boolean;
   armMarker(onDone: () => void): boolean;
   showHint(tileId: number): void;
   clearHint(): void;
@@ -26,12 +31,13 @@ export interface PuzzleRenderer {
 export async function createPuzzleRenderer(
   host: HTMLElement,
   vm: PuzzleViewModel,
-  dropTray: (x: number, y: number) => PuzzleTray | null | undefined,
-  showDropTarget: (tray: PuzzleTray | null | undefined) => void = () => {},
-  cameraPreferences?: { initial?: CameraView; save: (camera: CameraView) => void },
+  cameraPreferences?: BoardCameraPreferences,
+  reportCollection?: (selected: number, stored: number) => void,
 ): Promise<PuzzleRenderer> {
   const data=vm.board;if(!data)throw new Error("No puzzle state");
   const tiles=data.tiles;
+  let fieldSize = vm.getSnapshot().fieldSize ?? 1;
+  let table = fieldBounds(fieldSize);
   const selfId=data.selfId;
   const artwork = await loadPuzzleArtwork(data.imageId);
   const app=new Application();
@@ -45,10 +51,11 @@ export async function createPuzzleRenderer(
   let renderedFrames=0;
   const frames=new FrameScheduler(()=>{
     applyMove();
-    refreshAtlas();
+    if (pinch) updatePinch();
+    else atlas.refresh(camera.scale.x);
     app.render();
     updateReferenceComparison();
-    drawHint();
+    hints.draw();
     if(debugRender){
       app.canvas.dataset.renderedFrames=String(++renderedFrames);
       app.canvas.dataset.zoom=String(camera.scale.x);
@@ -67,29 +74,8 @@ export async function createPuzzleRenderer(
   const camera=new Container();app.stage.addChild(camera);
   const selection=new Graphics();selection.eventMode="none";selection.zIndex=Number.MAX_SAFE_INTEGER;
   selection.visible=false;camera.addChild(selection);
-  const hintCanvas = document.createElement("canvas");
-  hintCanvas.className = "tile-hint";
-  hintCanvas.setAttribute("aria-hidden", "true");
-  host.appendChild(hintCanvas);
-  const hintCtx = hintCanvas.getContext("2d")!;
-  const hintDirection = document.createElement("button");
-  hintDirection.type = "button";
-  hintDirection.className = "hint-direction";
-  hintDirection.setAttribute("aria-label", "Перейти до мітки");
-  hintDirection.title = "Перейти до мітки";
-  hintDirection.hidden = true;
-  hintDirection.addEventListener("click", () => {
-    if (hint && !controls.cameraLocked) centerOnTile(hint.tileId, marker?.position);
-  });
-  host.appendChild(hintDirection);
-  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const redrawHint = () => frames.request();
-  reducedMotion.addEventListener("change", redrawHint);
-  let hintColor = "#275b49", hintContrast = "#f5fbed";
-  let hint: { tileId: number | undefined; startedAt: number } | undefined;
-  let hintTimer: ReturnType<typeof setTimeout> | undefined;
-  let hintPainted = false;
-  let marker: BoardMarker | null = null;
+  const hints = createBoardHints(host, app, camera, () => frames.request(),
+    id => detailPieces.get(id), groupContainer, id => paths.get(id), centerOnTile, vm.clearMarker);
   let finishPointing: (() => void) | undefined;
 
   function groupContainer(tileId: number) {
@@ -105,7 +91,7 @@ export async function createPuzzleRenderer(
       const groupId = pieceGroups.get(id);
       const group = groupId === undefined ? undefined : vm.board?.groups.get(groupId);
       const container = groupContainer(id);
-      if (!group || (group.tray ?? null) !== mark.tray || !container || container.zIndex < topZ) continue;
+      if (!group || !container || container.zIndex < topZ) continue;
       if (piece.sprite.hitArea?.contains(mark.position.x - container.x - piece.sprite.x,
         mark.position.y - container.y - piece.sprite.y)) {
         tileId = id;
@@ -114,151 +100,11 @@ export async function createPuzzleRenderer(
     }
     return tileId;
   }
-  function clearHint() {
-    clearTimeout(hintTimer);
-    hint = undefined;
-    marker = null;
-    hintDirection.hidden = true;
-    if (hintPainted) frames.request();
-  }
-  function dismissHint() {
-    const received = marker;
-    clearHint();
-    if (received) vm.clearMarker(received);
-  }
-  function showHint(tileId: number) {
-    clearHint();
-    if (paths.has(tileId)) startHint(tileId, BOARD_MARKER_DURATION);
-  }
-  function startHint(tileId: number | undefined, duration: number) {
-    hint = { tileId, startedAt: performance.now() };
-    hintTimer = setTimeout(dismissHint, duration);
-    frames.request();
-  }
-  function drawHint() {
-    if (hintPainted) {
-      hintCtx.resetTransform();
-      hintCtx.clearRect(0, 0, hintCanvas.width, hintCanvas.height);
-      hintPainted = false;
-    }
-    if (!hint) return;
-    const { tileId } = hint;
-    const piece = tileId === undefined ? undefined : detailPieces.get(tileId);
-    const group = tileId === undefined ? undefined : groupContainer(tileId);
-    const position = tileId === undefined ? marker?.position : group?.visible ? group.position : undefined;
-    if (!position) {
-      hintDirection.hidden = true;
-      return;
-    }
-    const scale = camera.scale.x;
-    const x = camera.x + position.x * scale;
-    const y = camera.y + position.y * scale;
-    const { width, height } = app.screen;
-    const bounds = piece?.detailBounds;
-    const left = x + (bounds?.x ?? 0) * scale, right = left + (bounds?.width ?? 0) * scale;
-    const top = y + (bounds?.y ?? 0) * scale, bottom = top + (bounds?.height ?? 0) * scale;
-    const outside = right < 0 || bottom < 0 || left > width || top > height;
-    hintDirection.hidden = !outside;
-    if (outside) {
-      const inset = Math.min(32, width / 4, height / 4);
-      const usableBottom = Math.min(96, height / 3);
-      const cx = width / 2, cy = (height + inset - usableBottom) / 2;
-      const dx = (left + right) / 2 - cx, dy = (top + bottom) / 2 - cy;
-      const edge = 1 / Math.max(Math.abs(dx) / (cx - inset), Math.abs(dy) / (cy - inset));
-      hintDirection.style.left = `${cx + dx * edge}px`;
-      hintDirection.style.top = `${cy + dy * edge}px`;
-      hintDirection.style.setProperty("--hint-angle", `${Math.atan2(dx, -dy)}rad`);
-      hintDirection.disabled = controls.cameraLocked;
-      return;
-    }
-
-    if (hintCanvas.width !== app.canvas.width) hintCanvas.width = app.canvas.width;
-    if (hintCanvas.height !== app.canvas.height) hintCanvas.height = app.canvas.height;
-    const density = app.renderer.resolution;
-    const moving = !reducedMotion.matches;
-    const phase = (performance.now() - hint.startedAt) * 2 * Math.PI / 1400;
-    const pulse = moving ? (1 - Math.cos(phase)) / 2 : 0;
-    if (tileId === undefined) {
-      // Draw at screen size, with the foot of the flagpole anchored to the marked point.
-      const flagHeight = 52, flagWidth = 37;
-      const direction = y < flagHeight + 6 ? -1 : 1;
-      const side = x > width - flagWidth - 6 ? -1 : 1;
-      hintCtx.setTransform(density * side, 0, 0, density * direction, density * x, density * y);
-      hintCtx.globalAlpha = 1;
-      hintCtx.lineJoin = "round";
-      hintCtx.lineCap = "round";
-      hintCtx.beginPath();
-      hintCtx.moveTo(0, 0);
-      hintCtx.lineTo(0, -flagHeight);
-      hintCtx.lineTo(flagWidth, -flagHeight);
-      hintCtx.lineTo(flagWidth - 9, -flagHeight + 13);
-      hintCtx.lineTo(flagWidth, -flagHeight + 26);
-      hintCtx.lineTo(0, -flagHeight + 26);
-      hintCtx.fillStyle = hintColor;
-      hintCtx.fill();
-      hintCtx.strokeStyle = hintContrast;
-      hintCtx.lineWidth = 6 + pulse * 2;
-      hintCtx.stroke();
-      hintCtx.strokeStyle = hintColor;
-      hintCtx.lineWidth = 2.5;
-      hintCtx.stroke();
-      hintPainted = true;
-      if (moving) frames.request();
-      return;
-    }
-    const lineWidth = 2 + pulse * 1.6;
-
-    hintCtx.setTransform(density * scale, 0, 0, density * scale, density * x, density * y);
-    hintCtx.lineJoin = "round";
-    hintCtx.globalAlpha = .82 + pulse * .18;
-    hintCtx.strokeStyle = hintContrast;
-    hintCtx.lineWidth = (lineWidth + 2.5) / scale;
-    hintCtx.stroke(paths.get(tileId)!);
-    hintCtx.strokeStyle = hintColor;
-    hintCtx.lineWidth = lineWidth / scale;
-    hintCtx.stroke(paths.get(tileId)!);
-
-    hintPainted = true;
-    if (!moving) return;
-
-    // Screen coordinates keep the arrow's size and travel constant as the board zooms.
-    const centerX = Math.max(9, Math.min(width - 9, (Math.max(0, left) + Math.min(width, right)) / 2));
-    const centerY = Math.max(9, Math.min(height - 9, (Math.max(0, top) + Math.min(height, bottom)) / 2));
-    const bounce = 5 + pulse * 8;
-    let arrowX = centerX, arrowY = top - bounce, rotation = 0;
-    if (top < 28) {
-      if (bottom < height - 28) {
-        arrowY = bottom + bounce;
-        rotation = Math.PI;
-      } else if (right < width - 28 || left > 28) {
-        const onRight = right < width - 28;
-        arrowX = onRight ? right + bounce : left - bounce;
-        arrowY = centerY;
-        rotation = onRight ? Math.PI / 2 : -Math.PI / 2;
-      } else {
-        arrowY = 15 + bounce;
-      }
-    }
-    hintCtx.setTransform(density, 0, 0, density, density * arrowX, density * arrowY);
-    hintCtx.rotate(rotation);
-    hintCtx.globalAlpha = 1;
-    hintCtx.beginPath();
-    hintCtx.moveTo(-6, -10);
-    hintCtx.lineTo(6, -10);
-    hintCtx.lineTo(0, 0);
-    hintCtx.closePath();
-    hintCtx.fillStyle = hintColor;
-    hintCtx.fill();
-    hintCtx.strokeStyle = hintContrast;
-    hintCtx.lineWidth = 1.5;
-    hintCtx.stroke();
-    frames.request();
-  }
   function pointAt(global: { x: number; y: number }, tileId: number | null) {
     const { x, y } = camera.toLocal(global);
     vm.pointAt(tileId, {
-      x: Math.max(TABLE_BOUNDS.left, Math.min(TABLE_BOUNDS.right, x)),
-      y: Math.max(TABLE_BOUNDS.top, Math.min(TABLE_BOUNDS.bottom, y)),
+      x: Math.max(table.left, Math.min(table.right, x)),
+      y: Math.max(table.top, Math.min(table.bottom, y)),
     });
     endPointing();
   }
@@ -273,8 +119,7 @@ export async function createPuzzleRenderer(
   camera.addChild(boardFrame);
   function refreshPalette() {
     const palette = getComputedStyle(host);
-    hintColor = palette.getPropertyValue("--hint-color").trim() || "#275b49";
-    hintContrast = palette.getPropertyValue("--hint-contrast").trim() || "#f5fbed";
+    hints.setPalette(palette);
     // Blend puzzle edges against the actual table color in the same rendering pass.
     app.renderer.background.color = palette.getPropertyValue("--board-background").trim();
     boardFrame.clear().rect(0, 0, BOARD_WIDTH, BOARD_HEIGHT)
@@ -282,44 +127,9 @@ export async function createPuzzleRenderer(
       .stroke({ width: 2, color: palette.getPropertyValue("--board-line").trim() });
     frames.request();
   }
-  const atlas=document.createElement("canvas");atlas.width=4096;
-  const slots=new Map<number,{x:number;y:number;w:number;h:number;margin:number}>();
-  let sx=2,sy=2,rowHeight=0;
-  for(const tile of data.tiles){
-    const margin=Math.ceil(Math.min(tile.width,tile.height)*.26)+2;
-    const w=Math.ceil(tile.width)+margin*2,h=Math.ceil(tile.height)+margin*2;
-    if(sx+w>atlas.width){sx=2;sy+=rowHeight+4;rowHeight=0;}
-    slots.set(tile.id,{x:sx,y:sy,w,h,margin});sx+=w+4;rowHeight=Math.max(rowHeight,h);
-  }
-  atlas.height=sy+rowHeight+2;
-  const ctx=atlas.getContext("2d");if(!ctx)throw new Error("Canvas unavailable");
-  const hitCanvas=document.createElement("canvas"),hitCtx=hitCanvas.getContext("2d")!;
-  const paths=new Map<number,Path2D>();
-  for(const tile of data.tiles)paths.set(tile.id,new Path2D(pathData(tile)));
-  const atlasWidth=atlas.width,atlasHeight=atlas.height;
-  const gl="gl" in app.renderer ? app.renderer.gl as WebGLRenderingContext : null;
-  const maxTextureSize=gl ? gl.getParameter(gl.MAX_TEXTURE_SIZE) as number : 4096;
-  const atlasLimit=Math.min(2,maxTextureSize/atlasWidth,maxTextureSize/atlasHeight);
-  const atlasTexture=new Texture({source:new CanvasSource({resource:atlas,scaleMode:"linear",autoGenerateMipmaps:false})});
-  let atlasResolution=0;
-  function refreshAtlas(){
-    const resolution=Math.min(atlasLimit,detailResolution(camera.scale.x,app.renderer.resolution));
-    if(resolution===atlasResolution)return;
-    // Keep distant pieces in ONE shared texture, redrawn from the original at the
-    // current scale. Thousands of independent SVG textures made zooming expensive.
-    atlas.width=Math.ceil(atlasWidth*resolution);atlas.height=Math.ceil(atlasHeight*resolution);
-    ctx!.setTransform(resolution,0,0,resolution,0,0);
-    ctx!.imageSmoothingQuality="high";
-    for(const tile of tiles){
-      const slot=slots.get(tile.id)!;const path=paths.get(tile.id)!;
-      ctx!.save();ctx!.translate(slot.x+slot.margin-tile.x,slot.y+slot.margin-tile.y);
-      ctx!.clip(path);ctx!.drawImage(artwork.image,0,0,BOARD_WIDTH,BOARD_HEIGHT);
-      ctx!.strokeStyle="rgba(25,45,39,.42)";ctx!.lineWidth=1;ctx!.stroke(path);ctx!.restore();
-    }
-    atlasTexture.source.resolution=resolution;
-    atlasTexture.source.update();
-    atlasResolution=resolution;
-  }
+  const atlas = createPieceAtlas(app, tiles, artwork);
+  const { slots, paths, texture: atlasTexture } = atlas;
+  const hitCtx = document.createElement("canvas").getContext("2d")!;
   const sprites=new Map<number,Sprite>();
   const spriteTiles = new WeakMap<object, Tile>();
   let pointer: { clientX: number; clientY: number } | undefined;
@@ -341,12 +151,56 @@ export async function createPuzzleRenderer(
   let carryHeartbeat: ReturnType<typeof setInterval> | undefined;
   let z=1;
   let pendingMove:{x:number;y:number}|null=null;
-  let dropTarget: PuzzleTray | null | undefined;
-  function setDropTarget(tray: PuzzleTray | null | undefined) {
-    if (tray === dropTarget) return;
-    dropTarget = tray;
-    showDropTarget(tray);
+  const collection = createBoardCollection({
+    host, vm, camera, tiles, containers, reportCollection,
+    boundsForTable: () => table, highlightColor: () => hints.color,
+    localPoint: event => camera.toLocal(point(event)),
+    requestFrame: () => frames.request(),
+    syncBoard: () => synchronize({kind:"structure"}),
+  });
+
+  const touchInput = createBoardTouchInput({
+    vm, canvas: app.canvas, tiles, containers, point: event => point(event),
+    localPoint: event => camera.toLocal(point(event)),
+    scale: () => camera.scale.x, table: () => table,
+    gestureBlocked: () => !!(pinching || drag || pan), pointing: () => !!finishPointing,
+    selecting: () => collection.active || collection.hasSelection,
+    tileIdAt: position => tileAt(position)?.id ?? null,
+    pointAt, requestFrame: () => frames.request(), raise: container => { container.zIndex = ++z; },
+  });
+
+  function collectionDown(event: PointerEvent) {
+    if (touchInput.beginMarkerTap(event)) return;
+    if (vm.getSnapshot().viewingTray) return;
+    if (event.target !== app.canvas || event.button !== 0 || drag || pan || pinching || finishPointing || !vm.getSnapshot().connected) return;
+    const screen = point(event);
+    const local = camera.toLocal(screen);
+    const tile = tileAt(screen);
+    const id = tile && pieceGroups.get(tile.id);
+    const g = id ? vm.board?.groups.get(id) : undefined;
+    const eligible = g && !g.placed && !g.owner && !g.stored;
+    if (event.pointerType === "mouse") {
+      if (!collection.beginMouse(event,local,g)) return;
+    } else if (collection.acceptsBatch(g)) {
+      if (collection.batchActive) {
+        const previous = event.pointerType === "touch" && !g ? collection.takeEmptyBatch() : undefined;
+        if (previous) {
+          touches.set(previous.pointerId, camera.toGlobal(previous.start));
+          return;
+        }
+        event.stopPropagation();
+        return;
+      }
+      if (g && !eligible) return;
+      collection.startBatch(event.pointerId, local, g?.id);
+    } else if (event.pointerType === "touch" && eligible && !touches.size) {
+      touchInput.startFinger(event.pointerId, local, g);
+    } else if (touchInput.dragging) { event.stopPropagation(); return; }
+    else return;
+    event.stopPropagation();
+    app.canvas.setPointerCapture(event.pointerId);
   }
+  host.addEventListener("pointerdown", collectionDown, true);
   function showSelection(){
     const group=drag&&vm.board?.groups.get(drag.id);
     selection.clear();selection.visible=!!group;
@@ -366,7 +220,6 @@ export async function createPuzzleRenderer(
   }
   function stopDrag() {
     drag = null;
-    setDropTarget(undefined);
     pendingMove = null;
     clearInterval(carryHeartbeat);
     carryHeartbeat = undefined;
@@ -399,7 +252,7 @@ export async function createPuzzleRenderer(
         return;
       }
       const groupId=pieceGroups.get(tile.id),group=groupId?vm.board!.groups.get(groupId):undefined;
-      if(!group||group.placed||(group.owner!==null&&group.owner!==selfId))return;
+      if(!group||group.stored||group.placed||(group.owner!==null&&group.owner!==selfId))return;
       event.stopPropagation();
       const pointerId = controls.clickToCarry && event.pointerType === "mouse" ? null : event.pointerId;
       if (pointerId !== null) capture(event);
@@ -429,19 +282,28 @@ export async function createPuzzleRenderer(
       if (group.owner === selfId) drag.acknowledged = true;
       else if (group.placed || group.owner !== null || drag.acknowledged) stopDrag();
     }
-    if(drag?.id!==group.id)container.position.set(group.dx,group.dy);
+    const fingerActive = touchInput.keepsLocalPosition(group, selfId);
+    if (drag?.id !== group.id && !fingerActive) container.position.set(group.dx,group.dy);
     container.visible = drag?.id === group.id || vm.isGroupVisible(group);
     container.alpha=group.owner!==null&&group.owner!==selfId? .65:1;
     if(group.placed)container.zIndex=0;
   }
   function synchronize(change?:BoardChange){
     if(disposed||!vm.board)return;
-    if (!vm.getSnapshot().connected && drag) stopDrag();
+    const state = vm.getSnapshot();
+    boardCamera.switchArea(state.viewingTray ? "tray" : "table");
+    const nextSize = state.fieldSize ?? 1;
+    if (fieldSize !== nextSize) {
+      fieldSize = nextSize; table = fieldBounds(fieldSize);
+      camera.scale.set(Math.max(fitScale(),camera.scale.x));
+      positionCamera(camera.x,camera.y);
+    }
+    if (!vm.getSnapshot().connected) { collection.stopGestures(); touchInput.clearFingers(); collection.clear(); if (drag) stopDrag(); }
     if(change?.kind==="motion"){
       const group = vm.board.groups.get(change.groupId);
       const container = containers.get(change.groupId);
-      if (group && container && hint?.tileId !== undefined && pieceGroups.get(hint.tileId) === group.id &&
-        (group.dx !== container.x || group.dy !== container.y)) dismissHint();
+      if (group && container && hints.tileId !== undefined && pieceGroups.get(hints.tileId) === group.id &&
+        (group.dx !== container.x || group.dy !== container.y)) hints.dismissHint();
       if (group) applyGroup(group);
       details?.request();groupSurfaces?.request();frames.request();return;
     }
@@ -459,10 +321,10 @@ export async function createPuzzleRenderer(
       applyGroup(group);
       for(const id of group.pieces)pieceGroups.set(id,group.id);
     }
+    collection.refreshPicked();
     if (drag && !vm.board.groups.has(drag.id)) stopDrag();
     details?.request();groupSurfaces?.request();frames.request();
   }
-  const unsubscribe=vm.onBoardChange(synchronize);synchronize();
   const point=(event: Pick<PointerEvent, "clientX" | "clientY">)=>{
     const rect=app.canvas.getBoundingClientRect();
     return {x:(event.clientX-rect.left)*app.screen.width/rect.width,y:(event.clientY-rect.top)*app.screen.height/rect.height};
@@ -472,9 +334,9 @@ export async function createPuzzleRenderer(
     if(drag){
       const position=camera.toLocal(current);const container=containers.get(drag.id);
       if (container) {
-        const { dx, dy } = clampGroupToTable(drag.bounds, position.x - drag.offsetX, position.y - drag.offsetY);
-        if ((dx !== container.x || dy !== container.y) && hint?.tileId !== undefined &&
-          pieceGroups.get(hint.tileId) === drag.id) dismissHint();
+        const { dx, dy } = clampGroupToTable(drag.bounds, position.x - drag.offsetX, position.y - drag.offsetY, table);
+        if ((dx !== container.x || dy !== container.y) && hints.tileId !== undefined &&
+          pieceGroups.get(hints.tileId) === drag.id) hints.dismissHint();
         container.position.set(dx, dy);
         selection.position.copyFrom(container.position);
         vm.move(drag.id, dx, dy);
@@ -500,10 +362,12 @@ export async function createPuzzleRenderer(
     comparison(tile);
   }
   function onMove(event: PointerEvent) {
+    touchInput.trackMarkerTap(event);
+    if (collection.handleMouse(event) || touchInput.handleFinger(event) || collection.handleBatch(event)) return;
     if (touches.has(event.pointerId)) {
       touches.set(event.pointerId, point(event));
       if (pinching) {
-        updatePinch();
+        frames.request();
         return;
       }
     }
@@ -514,26 +378,21 @@ export async function createPuzzleRenderer(
     if (drag) {
       // A pointer released outside the window may re-enter without a pointerup event.
       if (drag.pointerId !== null && event.pointerType === "mouse" && !(event.buttons & 1)) {
-        finishDrag(undefined, true);
+        finishDrag(true);
         return;
       }
-      const tray = dropTray(event.clientX, event.clientY);
-      const currentTray = vm.board?.groups.get(drag.id)?.tray ?? null;
-      setDropTarget(tray === currentTray ? undefined : tray);
     }
     pendingMove = point(event);
     frames.request();
   }
-  function finishDrag(tray?: PuzzleTray | null, cancel = false) {
+  function finishDrag(cancel = false) {
     if (!drag) return;
     applyMove();
     const { id, startX, startY } = drag;
     const container = containers.get(id);
-    const group = vm.board?.groups.get(id);
-    const currentTray = group?.tray ?? null;
-    if (cancel || (tray !== undefined && tray !== currentTray)) {
+    if (cancel) {
       container?.position.set(startX, startY);
-      vm.stash(id, cancel ? currentTray : tray!, startX, startY);
+      vm.cancelDrag(id, startX, startY);
     } else if (container) {
       vm.release(id, container.x, container.y);
     }
@@ -541,17 +400,22 @@ export async function createPuzzleRenderer(
     synchronize({ kind: "visibility" });
   }
   function onUp(event: PointerEvent) {
+    touchInput.finishMarkerTap(event);
+    if (collection.handleMouse(event,true) || touchInput.handleFinger(event,true) || collection.handleBatch(event,true)) return;
     if (touches.delete(event.pointerId) && pinching) {
       pinch = undefined;
-      if (!touches.size) pinching = false;
+      details?.request(); groupSurfaces?.request(); frames.request();
+      if (touches.size >= 2) {
+        const span = touchSpan()!;
+        pinch = { distance: span.distance, scale: camera.scale.x, anchor: camera.toLocal(span) };
+      } else if (!touches.size) pinching = false;
       return;
     }
     const released = event.type === "pointerup";
     const endsGesture = !released || event.pointerType === "touch" || event.button === 0;
     if (drag?.pointerId === event.pointerId && endsGesture) {
       if (released) pendingMove = point(event);
-      // The actual element under the pointer can be a tray even when the canvas has capture.
-      finishDrag(released ? dropTray(event.clientX, event.clientY) : undefined, !released);
+      finishDrag(!released);
     }
     if (pan?.pointerId === event.pointerId && endsGesture) {
       if (released) pendingMove = point(event);
@@ -563,13 +427,16 @@ export async function createPuzzleRenderer(
     }
   }
   function onBlur() {
+    collection.stopGestures();
+    touchInput.onBlur();
+    synchronize({kind:'structure'});
     touches.clear();
     pinching = false;
     pinch = undefined;
     pointer = undefined;
     if (comparison) frames.request();
     endPointing();
-    if (drag) finishDrag(undefined, true);
+    if (drag) finishDrag(true);
     if (!pan) return;
     pan = null;
     pendingMove = null;
@@ -594,8 +461,11 @@ export async function createPuzzleRenderer(
       return;
     }
     if (event.key !== "Escape") return;
+    if (collection.mouseActive || (collection.hasSelection && window.matchMedia("(pointer: fine)").matches && !document.querySelector("dialog[open]"))) {
+      collection.cancelMouse(); collection.clear(); synchronize({kind:"structure"}); return;
+    }
     if (finishPointing) endPointing();
-    else if (drag?.pointerId === null) finishDrag(undefined, true);
+    else if (drag?.pointerId === null) finishDrag(true);
   }
   app.stage.eventMode="static";app.stage.hitArea=new Rectangle(0,0,app.screen.width,app.screen.height);
   app.stage.on("pointerdown", (event: FederatedPointerEvent) => {
@@ -615,35 +485,9 @@ export async function createPuzzleRenderer(
     pan = { x: event.global.x, y: event.global.y, cameraX: camera.x, cameraY: camera.y, pointerId: event.pointerId };
     app.canvas.style.cursor = "grabbing";
   });
-  const tablePadding = 32;
-  const scaleToFit = (width: number, height: number) => Math.max(.001, Math.min(6,
-    (app.screen.width - 2 * tablePadding) / width, (app.screen.height - 2 * tablePadding) / height));
-  const fitScale = () => scaleToFit(TABLE_WIDTH, TABLE_HEIGHT);
-  let saveViewTimer: ReturnType<typeof setTimeout> | undefined;
-  function saveView() {
-    if (saveViewTimer === undefined) return;
-    clearTimeout(saveViewTimer);
-    saveViewTimer = undefined;
-    const scale = camera.scale.x;
-    cameraPreferences?.save({ scale, center: {
-      x: (app.screen.width / 2 - camera.x) / scale,
-      y: (app.screen.height / 2 - camera.y) / scale,
-    } });
-  }
-  window.addEventListener("pagehide", saveView);
-  function positionCamera(x: number, y: number) {
-    const scale = camera.scale.x;
-    const clampAxis = (offset: number, screen: number, start: number, end: number) => {
-      if ((end - start) * scale <= screen - 2 * tablePadding) return (screen - (start + end) * scale) / 2;
-      return Math.max(screen - tablePadding - end * scale, Math.min(tablePadding - start * scale, offset));
-    };
-    camera.position.set(clampAxis(x, app.screen.width, TABLE_BOUNDS.left, TABLE_BOUNDS.right),
-      clampAxis(y, app.screen.height, TABLE_BOUNDS.top, TABLE_BOUNDS.bottom));
-    if (cameraPreferences) {
-      clearTimeout(saveViewTimer);
-      saveViewTimer = setTimeout(saveView, 250);
-    }
-  }
+  const boardCamera = createBoardCamera(camera, app.screen, () => table,
+    vm.getSnapshot().viewingTray ? "tray" : "table", cameraPreferences);
+  const { fitScale, position: positionCamera } = boardCamera;
   const zoomAt=(factor:number,x:number,y:number)=>{
     if (controls.cameraLocked) return;
     const before = camera.toLocal({ x, y });
@@ -668,7 +512,7 @@ export async function createPuzzleRenderer(
     pinching = true;
     endPointing();
     pendingMove = null;
-    if (drag) finishDrag(undefined, true);
+    if (drag) finishDrag(true);
     pan = null;
     camera.interactiveChildren = true;
     app.canvas.style.cursor = "default";
@@ -678,12 +522,11 @@ export async function createPuzzleRenderer(
   function updatePinch() {
     const span = touchSpan();
     if (!span || !pinch || controls.cameraLocked) return;
-    const scale = Math.max(fitScale(), Math.min(6, pinch.scale * span.distance / pinch.distance));
+    const target = Math.max(fitScale(), Math.min(6, pinch.scale * span.distance / pinch.distance));
+    const scale = Math.abs(target-camera.scale.x) < .0002 ? target : camera.scale.x + (target-camera.scale.x)*.55;
     camera.scale.set(scale);
     positionCamera(span.x - pinch.anchor.x * scale, span.y - pinch.anchor.y * scale);
-    details?.request();
-    groupSurfaces?.request();
-    frames.request();
+    if (scale !== target) frames.request();
   }
   function onWheel(event:WheelEvent){event.preventDefault();const p=point(event);zoomAt(Math.exp(-event.deltaY*.0015),p.x,p.y);}
   function preventContext(event:Event){event.preventDefault();}
@@ -696,20 +539,14 @@ export async function createPuzzleRenderer(
   window.addEventListener("blur", onBlur);
   app.canvas.addEventListener("wheel",onWheel,{passive:false});app.canvas.addEventListener("contextmenu",preventContext);
   function centerTable(scale: number) {
-    camera.scale.set(scale);
-    positionCamera(app.screen.width / 2 - (TABLE_BOUNDS.left + TABLE_BOUNDS.right) * scale / 2,
-      app.screen.height / 2 - (TABLE_BOUNDS.top + TABLE_BOUNDS.bottom) * scale / 2);
-    if(drag)showSelection();details?.request();groupSurfaces?.request();frames.request();
-  }
-  const savedView = cameraPreferences?.initial;
-  if (savedView) {
-    const scale = Math.max(fitScale(), Math.min(6, savedView.scale));
-    camera.scale.set(scale);
-    positionCamera(app.screen.width / 2 - savedView.center.x * scale, app.screen.height / 2 - savedView.center.y * scale);
+    boardCamera.centerTable(scale);
+    if (drag) showSelection();
+    details?.request();
+    groupSurfaces?.request();
     frames.request();
-  } else {
-    centerTable(scaleToFit(SCATTER_BOUNDS.right - SCATTER_BOUNDS.left, SCATTER_BOUNDS.bottom - SCATTER_BOUNDS.top));
   }
+  const unsubscribe = vm.onBoardChange(synchronize);
+  synchronize();
   details=new SharpPieceTextures(artwork,detailPieces,()=>{
     const corner=camera.toLocal({x:0,y:0});
     return {x:corner.x,y:corner.y,width:app.screen.width/camera.scale.x,height:app.screen.height/camera.scale.y,zoom:camera.scale.x,resolution:app.renderer.resolution};
@@ -743,13 +580,18 @@ export async function createPuzzleRenderer(
       y: piece.tile.y + piece.tile.height / 2 + group.y,
     } : fallback;
     if (!target) return;
-    const scale = camera.scale.x;
-    positionCamera(app.screen.width / 2 - target.x * scale, app.screen.height / 2 - target.y * scale);
+    boardCamera.centerOn(target);
     details?.request();
     groupSurfaces?.request();
     frames.request();
   }
   return {
+    setCollectionMode(active) {
+      if (drag) finishDrag(true);
+      collection.setMode(active);
+    },
+    storeSelected: collection.storeSelected,
+    restoreTray() { vm.collect([...vm.board!.groups.values()].filter(g=>g.stored).map(g=>g.id),"restore"); },
     setReferenceComparison(listener) {
       comparison = listener;
       comparedTile = undefined;
@@ -764,34 +606,53 @@ export async function createPuzzleRenderer(
         camera.interactiveChildren = true;
         app.canvas.style.cursor = "default";
       }
-      if (!next.clickToCarry && drag?.pointerId === null) finishDrag(undefined, true);
+      if (!next.clickToCarry && drag?.pointerId === null) finishDrag(true);
       controls = next;
-      hintDirection.disabled = controls.cameraLocked;
-    },
-    dropOnTray(tray) {
-      if (drag?.pointerId !== null) return false;
-      finishDrag(tray);
-      return true;
+      hints.setCameraLocked(controls.cameraLocked);
     },
     armMarker(onDone) {
-      if (drag || pan || finishPointing) return false;
+      if (drag || pan || touchInput.dragging || collection.batchActive || finishPointing) return false;
+      touchInput.resetMarkerSeries();
       finishPointing = onDone;
       app.canvas.classList.add("board-pointing");
       return true;
     },
-    showHint,
-    clearHint,
+    showHint: hints.showHint,
+    clearHint: hints.clearHint,
     showMarker(next, duration = BOARD_MARKER_DURATION) {
-      clearHint();
-      if (!next) return;
-      const tileId = markerTile(next);
-      marker = next;
-      startHint(tileId !== undefined && paths.has(tileId) ? tileId : undefined, duration);
+      hints.showMarker(next, next ? markerTile(next) : undefined, duration);
     },
     centerOnMarker(next) {
       centerOnTile(markerTile(next), next.position);
     },
     refreshPalette,
-    dispose(){disposed=true;clearTimeout(hintTimer);reducedMotion.removeEventListener("change", redrawHint);hintCanvas.remove();hintDirection.remove();saveView();window.removeEventListener("pagehide",saveView);clearInterval(carryHeartbeat);window.removeEventListener("keydown",onKeyDown);frames.dispose();groupSurfaces?.dispose();details?.dispose();unsubscribe();observer.disconnect();unwatchDensity();window.removeEventListener("pointermove",onMove,true);window.removeEventListener("pointerup",onUp,true);window.removeEventListener("pointercancel",onUp,true);window.removeEventListener("blur",onBlur);app.canvas.removeEventListener("pointerdown",startTouch,true);app.canvas.removeEventListener("wheel",onWheel);app.canvas.removeEventListener("contextmenu",preventContext);for(const sprite of sprites.values())sprite.texture.destroy();app.destroy(true,{children:true});atlasTexture.destroy(true);},
+    dispose() {
+      disposed = true;
+      collection.dispose();
+      touchInput.dispose();
+      hints.dispose();
+      boardCamera.dispose();
+      clearInterval(carryHeartbeat);
+      frames.dispose();
+      groupSurfaces?.dispose();
+      details?.dispose();
+      unsubscribe();
+      observer.disconnect();
+      unwatchDensity();
+
+      host.removeEventListener("pointerdown", collectionDown, true);
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("pointermove", onMove, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("pointercancel", onUp, true);
+      window.removeEventListener("blur", onBlur);
+      app.canvas.removeEventListener("pointerdown", startTouch, true);
+      app.canvas.removeEventListener("wheel", onWheel);
+      app.canvas.removeEventListener("contextmenu", preventContext);
+
+      for (const sprite of sprites.values()) sprite.texture.destroy();
+      app.destroy(true, {children:true});
+      atlasTexture.destroy(true);
+    },
   };
 }

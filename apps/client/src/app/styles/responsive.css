@@ -1,0 +1,219 @@
+@media (max-width:900px) {
+  .game-sidebar {
+    width: 240px;
+    padding: var(--space-16);
+  }
+  .game-title span {
+    display: none;
+  }
+  .game-header {
+    padding-inline: var(--space-16);
+  }
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  .game-shell {
+    height: 100dvh;
+    min-height: 0;
+  }
+
+  .game-content {
+    position: relative;
+  }
+
+  .game-sidebar {
+    position: absolute;
+    z-index: 2;
+    inset: 0 0 0 auto;
+    width: min(320px, 85%);
+    overscroll-behavior: contain;
+    box-shadow: var(--shadow-menu);
+  }
+
+  .board-toolbar {
+    bottom: max(var(--space-8), env(safe-area-inset-bottom));
+  }
+
+  .board-feedback {
+    bottom: calc(max(var(--space-8), env(safe-area-inset-bottom)) + var(--control-height) + var(--space-16));
+  }
+
+  .board-toolbar button {
+    padding-inline: var(--space-8);
+  }
+}
+
+@media (max-width: 640px) {
+  .game-header {
+    height: 52px;
+  }
+  .game-header .view-control {
+    min-width: var(--touch-target);
+  }
+  .game-header > .quiet-button {
+    white-space: nowrap;
+  }
+
+  .game-header {
+    gap: var(--space-8);
+    padding-inline: var(--space-8);
+  }
+  .game-connection {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+}
+
+@media (max-width: 760px), (pointer: coarse) {
+  :root {
+    --control-height: var(--touch-target);
+  }
+  .setting-hint, .field-error, .sidebar-copy, .instructions {
+    --font-meta: var(--font-control);
+  }
+  .preview-heading, .kick-confirm > div {
+    flex-wrap: wrap;
+  }
+}
+
+@media (any-pointer: coarse) {
+  .game-shell {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .board-host,
+  .reference-viewport {
+    -webkit-touch-callout: none;
+  }
+
+  .game-shell input,
+  .game-shell textarea,
+  .game-shell [contenteditable="true"] {
+    -webkit-user-select: text;
+    user-select: text;
+    -webkit-touch-callout: default;
+  }
+}
+
+@media (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
+  .game-header {
+    height: var(--touch-target);
+    padding-left: max(var(--space-8), env(safe-area-inset-left));
+    padding-right: max(var(--space-8), env(safe-area-inset-right));
+  }
+
+  .game-connection {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .board-toolbar {
+    inset-inline: auto;
+    right: max(var(--space-8), env(safe-area-inset-right));
+    bottom: calc(var(--space-4) + env(safe-area-inset-bottom));
+    padding: var(--space-4);
+    gap: 0;
+  }
+
+  .board-feedback {
+    bottom: calc(var(--touch-target) + var(--space-16) + env(safe-area-inset-bottom));
+  }
+
+
+  .reference {
+    right: max(var(--space-8), env(safe-area-inset-right));
+  }
+
+  .reference {
+    width: min(204px, 42%);
+    max-height: calc(100% - var(--space-64));
+  }
+}
+
+@media (max-width: 600px) {
+  .header-inner, .main, .footer {
+    padding-inline: var(--space-16);
+  }
+
+  .main {
+    padding-block: var(--space-24);
+  }
+
+  .hero {
+    gap: var(--space-24);
+  }
+
+  h1 {
+    font-size: clamp(2rem, 8.5vw, 2.75rem);
+  }
+
+  .create-actions > button, .join-room > div > button {
+    min-height: var(--touch-target);
+  }
+
+  .create-actions > button {
+    width: 100%;
+  }
+
+  .saved-puzzles ul {
+    max-height: none;
+    padding-inline-end: 0;
+  }
+
+  .saved-puzzle-actions .button {
+    min-height: var(--touch-target);
+  }
+
+  .delete-puzzle-dialog {
+    width: min(420px, calc(100% - 2 * var(--space-12)));
+    padding: var(--space-16);
+  }
+
+  .delete-puzzle-actions > button {
+    flex: 1 1 auto;
+  }
+
+  .board-toolbar {
+    gap: 0;
+  }
+
+  .reference {
+    width: min(240px, 74%);
+  }
+}
+
+@media (any-pointer: coarse) {
+  .join-room input, .invite-input, .rename-puzzle-form input, .piece-setting input {
+    font-size: 1rem;
+  }
+
+
+  .game-sidebar {
+    padding-bottom: max(var(--space-16), env(safe-area-inset-bottom));
+    padding-right: max(var(--space-16), env(safe-area-inset-right));
+  }
+
+  .delete-puzzle-dialog {
+    max-height: calc(100dvh - var(--space-16) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    overscroll-behavior: contain;
+  }
+}
+
+@media (max-width: 380px) {
+  .game-title {
+    display: none;
+  }
+  .join-room > div {
+    flex-wrap: wrap;
+  }
+  .join-room input {
+    flex-basis: 100%;
+  }
+}

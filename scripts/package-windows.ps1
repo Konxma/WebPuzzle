@@ -76,8 +76,11 @@ try {
   }
 
   $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+  $icon = Join-Path $PSScriptRoot 'portable/WebPuzzle.ico'
   $banner = Join-Path $PSScriptRoot 'portable/quiet-bay-banner.png'
-  & $compiler /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/resource:$banner,WebPuzzle.Banner" "/out:$stage/WebPuzzle.exe" (Join-Path $PSScriptRoot 'portable/WebPuzzleLauncher.cs') (Join-Path $PSScriptRoot 'portable/LauncherArtwork.cs')
+  $launcherSources = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'portable') -Filter 'WebPuzzleLauncher*.cs' -File |
+    Sort-Object Name | ForEach-Object FullName)
+  & $compiler /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/win32icon:$icon" "/resource:$banner,WebPuzzle.Banner" "/out:$stage/WebPuzzle.exe" @launcherSources (Join-Path $PSScriptRoot 'portable/LauncherArtwork.cs')
   if ($LASTEXITCODE -ne 0) { throw 'Windows launcher build failed.' }
 
   Add-Type -AssemblyName System.IO.Compression.FileSystem

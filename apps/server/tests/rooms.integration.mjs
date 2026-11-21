@@ -40,7 +40,7 @@ test("clients synchronize, ownership and reconnection work",async()=>{
     let markerB, markerC;
     b.onMessage("board-marker", marker => { markerB = marker; });
     c.onMessage("board-marker", marker => { markerC = marker; });
-    a.send("command", { type: "point-at", position: { x: 200, y: 150 }, tray: null, tileId: null });
+    a.send("command", { type: "point-at", position: { x: 200, y: 150 }, tileId: null });
     await until(() => markerB && markerC, "marker reached both guests");
     assert.deepEqual(markerB, markerC);
     a.send("command",{type:"grab-group",groupId:"0"});
@@ -55,6 +55,28 @@ test("clients synchronize, ownership and reconnection work",async()=>{
     assert.equal(sa.deltas.length, length, "sender does not receive its own motion");
     a.send("command",{type:"release-group",groupId:"0",position:{x:0,y:0}});
     await until(()=>sb.deltas.some(d=>d.groups.some(g=>g.id==="0"&&g.placed)),"placement propagated");
+    const undoAvailability = [], undoReplies = [];
+    a.onMessage("collection-undo", value => undoAvailability.push(value));
+    a.onMessage("board-action-result", result => undoReplies.push(result));
+    const original = sa.snapshot.groups.filter(g => g.id === "1" || g.id === "2");
+    a.send("command", { type:"collection", ids:["1","2"], action:"slide", x:-5000, y:0 });
+    await until(() => undoAvailability.at(-1) === true, "collection movement can be undone");
+    a.send("command", { type:"undo-collection", requestId:1 });
+    await until(() => undoReplies.some(r => r.requestId === 1 && r.outcome === "done"), "undo acknowledged");
+    await until(() => sb.deltas.some(delta => original.every(previous => delta.groups.some(
+      g => g.id === previous.id && g.dx === previous.dx && g.dy === previous.dy
+    ))), "original coordinates restored for the guest");
+    a.send("command", { type:"collection", ids:["1","2"], action:"store", x:0, y:0 });
+    await until(() => undoAvailability.at(-1) === true, "tray drop can be undone");
+    a.send("command", { type:"undo-collection", requestId:2 });
+    await until(() => undoReplies.some(r => r.requestId === 2 && r.outcome === "done"), "tray undo acknowledged");
+    await until(() => sb.deltas.at(-1).groups.every(g => !g.stored), "tray undo restored the table");
+    a.send("command", { type:"collection", ids:["1","2"], action:"slide", x:-5000, y:0 });
+    await until(() => undoAvailability.at(-1) === true, "new movement recorded");
+    b.send("command", { type:"grab-group", groupId:"1" });
+    await until(() => undoAvailability.at(-1) === false, "guest grab invalidated the undo");
+    a.send("command", { type:"undo-collection", requestId:3 });
+    await until(() => undoReplies.some(r => r.requestId === 3 && r.outcome === "unavailable"), "stale undo rejected");
     const token=b.reconnectionToken;
     // Exercise explicit token recovery without racing the SDK's background reconnect.
     b.reconnection.enabled=false;
